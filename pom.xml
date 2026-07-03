@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.lynx</groupId>
+  <artifactId>lynx-parent</artifactId>
+  <version>0.1.0</version>
+  <packaging>pom</packaging>
+
+  <name>Lynx — Multi-Currency Ledger Engine</name>
+  <description>Production-grade multi-currency ledger with 3-step saga orchestration, event-driven CQRS, and distributed tracing</description>
+  <url>https://github.com/rajenthar/portfolio/tree/main/lynx</url>
+
+  <!-- SHARED LIBRARIES (6 modules) -->
+  <modules>
+    <!-- Foundation -->
+    <module>shared/lynx-common</module>
+    <module>shared/lynx-money</module>
+    <module>shared/lynx-security</module>
+    <module>shared/lynx-idempotency</module>
+    <module>shared/lynx-events</module>
+    <module>shared/lynx-telemetry</module>
+
+    <!-- PHASE 1: CORE SERVICES (15 modules) -->
+    <!-- Edge -->
+    <module>services/api-gateway</module>
+    <module>services/auth-service</module>
+
+    <!-- Pre-flight checks -->
+    <module>services/fraud-detection-service</module>
+    <module>services/limits-service</module>
+
+    <!-- Orchestration -->
+    <module>services/transaction-service</module>
+    <module>services/saga-orchestrator</module>
+
+    <!-- Core money services -->
+    <module>services/ledger-service</module>
+    <module>services/account-service</module>
+    <module>services/fx-rate-service</module>
+
+    <!-- Downstream consumers -->
+    <module>services/notification-service</module>
+    <module>services/reconciliation-service</module>
+    <module>services/reporting-service</module>
+    <module>services/audit-service</module>
+    <module>services/admin-service</module>
+
+    <!-- PHASE 2: PLANNED SERVICES (6 modules - skeleton only) -->
+    <module>services/kyc-service</module>
+    <module>services/reference-data-service</module>
+    <module>services/fee-service</module>
+    <module>services/settlement-service</module>
+    <module>services/scheduler-service</module>
+    <module>services/config-service</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+
+    <!-- Dependencies -->
+    <spring-boot.version>3.3.0</spring-boot.version>
+    <spring-cloud.version>2023.0.0</spring-cloud.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Spring Boot BOM -->
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring-boot.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- Spring Cloud BOM -->
+      <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-dependencies</artifactId>
+        <version>${spring-cloud.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- Java 21 features -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- JSON processing (records support) -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!-- Logging -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-logging</artifactId>
+    </dependency>
+
+    <!-- Testing -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <source>21</source>
+          <target>21</target>
+          <release>21</release>
+          <parameters>true</parameters>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.0.0</version>
+      </plugin>
+
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <version>${spring-boot.version}</version>
+        <configuration>
+          <excludes>
+            <exclude>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+            </exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
