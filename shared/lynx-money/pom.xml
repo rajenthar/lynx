@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.lynx</groupId>
+    <artifactId>lynx-parent</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>lynx-money</artifactId>
+  <packaging>jar</packaging>
+
+  <name>lynx-money</name>
+  <description>Currency-aware, BigDecimal-backed Money value type. Zero external dependencies.</description>
+
+  <!--
+    Deliberately dependency-free (JDK only).
+    Money is the most widely reused type in the system; it must not drag any
+    framework onto a consumer's classpath. Business rules (insufficient funds,
+    limits) live in the SERVICES that use Money, not in Money itself.
+  -->
+</project>
