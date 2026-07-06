@@ -1,0 +1,218 @@
+# Lynx — Decision Summary (Quick Reference)
+
+One-page reference of every architectural decision. Full reasoning lives in the individual ADRs — this file is for quick lookup during development.
+
+---
+
+## The System in One Paragraph
+
+Multi-currency transfers execute as a **3-step ledger-first saga** (HOLD → FX_LOCK → SETTLE) controlled by a **central orchestrator**. The **append-only ledger in Postgres is the single source of truth**; every write also inserts an **outbox event in the same transaction**, which **Debezium streams from the Postgres WAL to Kafka topics**. Read models (**account-service** balances) are **projections built from those events** — fast, eventually consistent, disposable. **Duplicates are impossible** end-to-end: client Idempotency-Key → deterministic saga_id → DB UNIQUE constraints.
+
+---
+
+## Decision Index
+
+| # | Decision | Instead of | Why (one line) |
+|---|---|---|---|
+| [ADR-001](ADR-001-ledger-first-saga.md) | Ledger-first 3-step saga | Dual-write to multiple services | Ledger entry is the durable, idempotent marker; recovery is deterministic |
+| [ADR-002](ADR-002-transactional-outbox.md) | Transactional outbox + Debezium CDC | Publishing to broker directly from services | Same-transaction insert = events can never be lost or orphaned |
+| [ADR-003](ADR-003-saga-orchestrator.md) | Central saga orchestrator (polling) | Event choreography | Explicit flow; single place for state, recovery, and compensation |
+| [ADR-004](ADR-004-idempotency.md) | Idempotency-Key + deterministic saga_id | Random saga_id, cache-only dedup | DB UNIQUE constraint is the safety net that survives crashes |
+| [ADR-005](ADR-005-cqrs-read-model.md) | account-service as pure CQRS projection | Querying ledger for balances | Reads scale independently; ledger write path stays untouched |
+
+---
+
+## Core Rules (Apply Everywhere)
+
+1. **Ledger is the only source of truth.** Money decisions (sufficient funds, saga progress) are NEVER made from read models or caches.
+2. **Cache for speed, database for correctness.** The system must remain fully correct with every cache wiped.
+3. **All consumers/handlers are idempotent.** The broker delivers at-least-once; every handler must tolerate redelivery.
+4. **Never bypass the outbox.** No service publishes to the broker directly — events flow only via ledger-transaction → outbox → Debezium.
+5. **Correctness decisions run under SERIALIZABLE + pessimistic locks** on the write side.
+6. **Compensation is explicit.** Rollback logic lives in the orchestrator, not scattered across services.
+
+---
+
+## Domain Model
+
+- Users hold **multiple accounts**; each account holds **balances in multiple currencies** (dynamic currency support)
+- Balances are tracked per `(account_id, currency)` — one projection row each
+- Double-entry bookkeeping: every movement has DR + CR legs, invariant `sum(DR) = sum(CR)` always
+
+---
+
+## Saga (ADR-001, ADR-003)
+
+**Phases:** `HOLDING → FX_LOCKED → SETTLED` (or `FAILED` + compensation from any step)
+
+**Ledger entries per phase:** HOLD_DR/HOLD_CR → LOCK_DR/LOCK_CR → SETTLE_DR/SETTLE_CR
+
+**Orchestration pattern: centralized (orchestrator commands services), NOT choreography.** Rejected because choreography gives out-of-order delivery across topics, duplicates from retries, no enforced ordering, no central visibility, distributed recovery logic, and cascading failures.
+
+**Orchestrator loop (per phase, batched, locked):**
+```sql
+SELECT * FROM saga_state
+WHERE status = 'HOLDING'          -- one query PER PHASE (never combined + re-checked)
+LIMIT 100                         -- batching: pipeline continuously, don't drain 1M rows first
+FOR UPDATE;                       -- pessimistic lock: whole batch claimed atomically
+```
+- **FOR UPDATE locks all 100 rows atomically in one query** — no two orchestrator instances ever claim the same rows; waiting instances get the NEXT batch
+- **Multiple stateless orchestrator instances (3+)** scale linearly with zero coordination code — Postgres row locks do the distribution
+- **Polling interval ~100ms** — acceptable vs 600ms saga latency; phantom rows (new sagas arriving mid-batch) are simply picked up next iteration (batching, not starvation)
+- **No CDC/events on saga_state** — that would be circular (orchestrator reacting to its own updates) and reintroduce race conditions. CDC is for domain events only.
+- **Isolation level: SERIALIZABLE, mandatory** — weaker levels allow dirty reads (READ UNCOMMITTED — locks not even respected), phantom reads (READ COMMITTED), or serialization anomalies (REPEATABLE READ)
+- **Pessimistic over optimistic locking** — saga_state is heavily contended; version-check retries would thrash. Lock-and-wait is calmer and needs no retry logic.
+
+**Required indexes (without them: full table scans on 1M+ rows):**
+```sql
+CREATE INDEX idx_saga_state_status_created ON saga_state(status, created_at);  -- orchestrator polling
+CREATE INDEX idx_saga_state_status_updated ON saga_state(status, updated_at);  -- recovery worker
+```
+
+**Recovery worker (independent process):** finds sagas with `updated_at < NOW() - 5 min`, resumes the next step based on current status. Every step is idempotent → safe to retry. SLA: stuck saga resumed < 15 min.
+
+**Compensation (in orchestrator, explicit):** on failure — release hold, unlock FX rate, set status FAILED, publish TransferFailed.
+
+**Ledger storage:** append-only, immutable, time-partitioned monthly (native Postgres `PARTITION BY RANGE (created_at)` — logical routing, no data copying); old partitions archived then dropped. Full audit replay: `SELECT * FROM ledger WHERE saga_id = ? ORDER BY created_at`.
+
+**Rejected alternatives:** choreography (see above), optimistic locking (retry thrashing), 2PC/XA (blocks resources, cascading failures), Temporal (extra infra; reconsider Phase 2+ if saga logic grows), CDC-driven saga state (circular).
+
+---
+
+## Events & Outbox (ADR-002)
+
+**Publishing path:**
+```
+INSERT ledger + INSERT outbox   (same ACID transaction — both or neither)
+  → Postgres WAL
+  → Debezium (logical replication slot — Postgres PUSHES changes; ~1-2ms, not polling)
+  → Kafka topic
+  → consumers (account, notification, audit, reconciliation)
+```
+
+**Why events at all (vs consumers querying ledger):** loose coupling (schema evolution without redeploys), real-time (~1-2ms vs polling), zero read load on ledger, instant fan-out to any number of services, new consumers just subscribe.
+
+**Topic design — critical rules:**
+- **Single topic for outbox events** (`ledger.public.outbox`) — NEVER split event types across topics; order is guaranteed only within a partition, not across topics
+- **Partition key = saga_id** — all events of one saga land in one partition, delivered in order; different sagas process in parallel
+- **Repartitioning is safe** (atomic rebalance preserves per-partition order) as long as the partition key never changes
+
+**Outbox schema:** `id, saga_id, event_type, payload JSONB, created_at, published_at, status` + index on `(status, created_at)`
+
+**Delivery semantics:** at-least-once (Debezium may republish after crash) → deduplication is the CONSUMER's job (idempotent handlers, ADR-004/005 patterns)
+
+**Housekeeping:** scheduled job deletes published outbox entries older than 7 days.
+
+**Rejected alternatives:** dual-write (race between DB and broker), events-first (ghost events without ledger backing), in-memory queue (lost on crash), consumers polling ledger (latency + load + coupling).
+
+---
+
+## Idempotency (ADR-004)
+
+**The chain:**
+```
+Client generates Idempotency-Key (UUID v4, stored client-side, REUSED on retry)
+        ↓
+saga_id = UUID.nameUUIDFromBytes(user_id + "|" + idempotency_key)   ← DETERMINISTIC, never random
+        ↓
+UNIQUE(saga_id, idempotency_key, entry_type) on ledger               ← DB-level safety net
+```
+
+**Why each piece:**
+- **Client-generated key**: only the client knows "this is the same attempt"; server just enforces
+- **user_id in derivation** (from JWT `sub` claim — a UUID issued by auth-service): two users accidentally sending the same key derive DIFFERENT saga_ids and never block each other
+- **Deterministic saga_id**: retry re-derives the SAME saga_id → constraint fires. A random saga_id would make every retry look new → silent duplicates (system-breaking bug)
+- **Composite UNIQUE, not saga_id alone**: defense-in-depth against hash collisions — a collision with different keys stays allowed and detectable instead of blocking an innocent user (collision odds ~1 in 2^122: acceptable)
+- **entry_type in the constraint**: one saga legitimately writes multiple legs (HOLD_DR + HOLD_CR share saga_id + key); a retry re-inserting the same leg violates → whole transaction rolls back (atomicity)
+
+**Request-handling pattern (API layer):**
+```
+1. Cache check (Redis, key = user_id + "|" + idempotency_key) — fast path, performance ONLY
+2. Try the insert — the DATABASE is the judge of duplicates
+3. On UNIQUE violation: read the original from the DB
+   (NOT the cache — first attempt may have crashed before cache.put),
+   reconstruct the response, backfill the cache, return it
+```
+
+**TTLs:** cached responses and idempotency records kept 24h (covers retry window; nightly cleanup job).
+
+**Three IDs — never confuse:**
+| ID | Purpose | Uniqueness enforced? |
+|---|---|---|
+| Idempotency-Key | Prevent duplicate client requests | Yes (via constraint) |
+| Saga-ID | Track saga progress internally | Yes (derived deterministically) |
+| Correlation-ID | Trace one request across services (observability) | **No — never used for dedup; may be shared across related requests** |
+
+**Security notes:** Idempotency-Key is not a secret (but travels over HTTPS); rate-limit by API key, not by Idempotency-Key; log every attempt (retries logged as cache/duplicate hits) for audit.
+
+**Rejected alternatives:** Retry-After header (delays, doesn't dedupe), rollback-only (retries create new sagas), separate dedup service (complexity without gain), SELECT-then-INSERT check (race between check and insert — the constraint IS the atomic check).
+
+---
+
+## Read Side — CQRS (ADR-005)
+
+**account-service is a pure projection: written ONLY by event consumption, never by request handlers.**
+
+**Why:** reads outnumber writes ~100:1; `SUM` over an append-only ledger is slow and puts read traffic on the money-critical write path. Projection = <1ms point-reads, zero ledger load, independent scaling (service replicas + DB read replicas).
+
+**Schema:**
+```sql
+account_balances (
+  account_id, currency,             -- PK (multi-currency native)
+  available_balance, held_balance,
+  last_event_id,                    -- idempotent-apply guard
+  updated_at
+)
+```
+
+**Balance math per event:**
+| Event | Effect |
+|---|---|
+| TransferHeld | `available -= x, held += x` |
+| TransferSettled | source: `held -= x`; recipient: `available += converted` |
+| TransferFailed | `held -= x, available += x` (money returned) |
+
+**Idempotent apply (redelivery-safe):**
+```sql
+UPDATE account_balances SET ..., last_event_id = :id
+WHERE account_id = :acc AND currency = :cur
+  AND last_event_id < :id;   -- 0 rows affected = already applied → skip
+```
+
+**Rules:**
+- **Eventual consistency (~10-50ms lag) is acceptable BY DESIGN** — the projection is display-only; the saga checks funds against the LEDGER, so a stale projection can never cause an overspend
+- **Projection is disposable**: TRUNCATE + rebuild from ledger (or replay the topic from offset 0) anytime; a projection bug is an inconvenience, never data loss
+- **Redis sits IN FRONT of the Postgres projection, never replaces it** — Redis restart = cold (RAM wiped); RDB snapshots lose minutes, AOF `everysec` still loses ~1s and `always` kills performance; no SQL for reconciliation
+- **reconciliation-service** compares ledger SUM vs projection nightly (sampled hourly) — drift target ZERO; any drift = alert + auto-rebuild that account + root-cause
+- **Monitor consumer lag**; alert if > 5s; scale consumers via partitions
+
+**Rejected alternatives:** direct ledger queries (slow, couples read load to write path), synchronous balance updates inside the saga (hot-account lock contention + reintroduces dual-write), Postgres materialized views (full recompute, still on ledger DB), Redis-only store (durability).
+
+---
+
+## Concurrency Cheat Sheet
+
+| Mechanism | Where used | What it prevents |
+|---|---|---|
+| SERIALIZABLE isolation | All ledger/saga writes | Dirty reads, phantom reads, anomalies |
+| `SELECT ... FOR UPDATE` | saga_state claiming | Two orchestrators processing the same saga |
+| `FOR UPDATE` + `LIMIT n` | Orchestrator batching | Duplicate batch claims across instances |
+| UNIQUE(saga_id, idempotency_key, entry_type) | ledger | Duplicate money movement on retry |
+| Deterministic saga_id | Request → saga mapping | Retries creating "new" sagas |
+| `last_event_id` guard | Read-model consumers | Double-applying redelivered events |
+| Partition key = saga_id | Event topics | Out-of-order event processing per saga |
+
+---
+
+## Performance Targets
+
+| Metric | Target |
+|---|---|
+| POST /v1/transfers P95 | < 1.2s |
+| Ledger write | < 50ms |
+| Saga execution | < 800ms |
+| Balance read | < 1ms (projection point-read / cache) |
+| Transfer success rate | > 99.5% |
+| Duplicate rate | 0% |
+| Recovery SLA | < 15 min |
+| Projection drift | 0 (reconciliation-verified) |
