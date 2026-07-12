@@ -9,7 +9,8 @@ package com.lynx.common.error;
  * types and surface as INTERNAL_ERROR at the API boundary.
  */
 public sealed class LynxException extends RuntimeException
-    permits ValidationException, NotFoundException, ConflictException, BusinessRuleException {
+    permits ValidationException, NotFoundException, ConflictException,
+            BusinessRuleException, AuthException {
 
   private final ErrorCode code;
 

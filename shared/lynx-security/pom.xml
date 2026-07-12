@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.lynx</groupId>
+    <artifactId>lynx-parent</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>lynx-security</artifactId>
+  <packaging>jar</packaging>
+
+  <name>lynx-security</name>
+  <description>JWT (RS256) verification with JWKS caching, user-context extraction, correlation-ID propagation</description>
+
+  <dependencies>
+    <!-- Error model (AuthException 401/403) -->
+    <dependency>
+      <groupId>com.lynx</groupId>
+      <artifactId>lynx-common</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+
+    <!-- JOSE/JWT: RS256 verification + remote JWKS with caching.
+         Version pinned explicitly: nimbus-jose-jwt is governed by Spring Security's
+         BOM, which this project does not import, so the Spring Boot BOM does not
+         manage it. -->
+    <dependency>
+      <groupId>com.nimbusds</groupId>
+      <artifactId>nimbus-jose-jwt</artifactId>
+      <version>9.40</version>
+    </dependency>
+
+    <!-- Structured logging: correlation-ID into the MDC -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <!--
+      Servlet API for the correlation-ID filter. 'provided': the servlet container
+      (or spring-boot-starter-web in each service) supplies it at runtime, so we
+      compile against it without shipping or forcing a particular version.
+    -->
+    <dependency>
+      <groupId>jakarta.servlet</groupId>
+      <artifactId>jakarta.servlet-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+</project>
