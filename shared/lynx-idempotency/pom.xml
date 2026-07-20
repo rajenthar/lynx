@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.lynx</groupId>
+    <artifactId>lynx-parent</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>lynx-idempotency</artifactId>
+  <packaging>jar</packaging>
+
+  <name>lynx-idempotency</name>
+  <description>
+    ADR-004 idempotency building blocks: validated Idempotency-Key, deterministic
+    saga_id derivation, cache abstraction, and the guard encoding the
+    cache-first / DB-is-the-judge / recover-from-store flow.
+  </description>
+
+  <dependencies>
+    <!-- ValidationException (bad key) + ConflictException.duplicateRequest (409) -->
+    <dependency>
+      <groupId>com.lynx</groupId>
+      <artifactId>lynx-common</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+  </dependencies>
+</project>

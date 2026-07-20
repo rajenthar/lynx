@@ -90,26 +90,17 @@
     </dependencies>
   </dependencyManagement>
 
+  <!--
+    Only TEST tooling is inherited by every module. Test-scope dependencies are
+    NOT transitive, so they never leak onto a consumer's runtime classpath.
+
+    Compile/runtime dependencies (Spring Boot starters, Jackson, etc.) are declared
+    per-module by whichever module actually needs them. This keeps the shared value
+    libraries (lynx-common, lynx-money) minimal: a service importing Money must not
+    be forced to inherit the whole Spring Framework. Versions for all of these are
+    still governed centrally by the Spring Boot BOM in <dependencyManagement> above.
+  -->
   <dependencies>
-    <!-- Java 21 features -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter</artifactId>
-    </dependency>
-
-    <!-- JSON processing (records support) -->
-    <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
-    </dependency>
-
-    <!-- Logging -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-logging</artifactId>
-    </dependency>
-
-    <!-- Testing -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
