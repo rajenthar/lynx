@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.lynx</groupId>
+    <artifactId>lynx-parent</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>lynx-telemetry</artifactId>
+  <packaging>jar</packaging>
+
+  <name>lynx-telemetry</name>
+  <description>
+    Structured-logging MDC utilities (SagaMdc, MdcScope) and a minimal
+    OpenTelemetry trace-context reader (TraceIds). Full OTel SDK/exporter
+    bootstrap is deliberately NOT here — that is dependency+YAML driven per
+    service (micrometer-tracing-bridge-otel) plus the collector wired in
+    Phase 0.9's infra, not shared Java code.
+  </description>
+
+  <!--
+    OpenTelemetry's own BOM, imported here (not the root pom — no other module
+    needs OTel). This is the same lesson as the root pom's Spring Boot BOM:
+    hand-picking individual artifact versions risks a mismatched set (verified
+    the hard way here — opentelemetry-sdk:1.41.0 alone pulled in
+    opentelemetry-sdk-trace:1.37.0, an inconsistent transitive set). The BOM
+    guarantees every OTel artifact resolves to versions actually released and
+    tested together.
+  -->
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-bom</artifactId>
+        <version>1.41.0</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <!--
+      API only — no SDK, no exporters. Just enough to READ the current
+      trace/span id from whatever OTel instrumentation a service has already
+      wired up (typically via Spring Boot's micrometer-tracing-bridge-otel).
+      This keeps the library from dragging in exporters/samplers/propagators
+      it has no business configuring. Version comes from the BOM above.
+    -->
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-api</artifactId>
+    </dependency>
+
+    <!-- Test-only: a real (in-memory) SDK to create actual spans for TraceIdsTest. -->
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
