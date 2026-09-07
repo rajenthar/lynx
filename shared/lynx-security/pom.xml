@@ -52,5 +52,15 @@
       <artifactId>jakarta.servlet-api</artifactId>
       <scope>provided</scope>
     </dependency>
+
+    <!--
+      JSON parsing for ServiceTokenProvider's OAuth2 Client Credentials token
+      response (RFC 6749 §5.1: {"access_token","token_type","expires_in"}).
+      Version managed by the root pom's Spring Boot BOM.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
   </dependencies>
 </project>

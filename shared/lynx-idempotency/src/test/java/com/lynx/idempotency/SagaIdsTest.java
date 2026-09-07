@@ -10,9 +10,9 @@ import org.junit.jupiter.api.Test;
 class SagaIdsTest {
 
   private static final IdempotencyKey KEY_A =
-      IdempotencyKey.of("550e8400-e29b-41d4-a716-446655440000");
+      IdempotencyKey.derivedFrom("550e8400-e29b-41d4-a716-446655440000");
   private static final IdempotencyKey KEY_B =
-      IdempotencyKey.of("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+      IdempotencyKey.derivedFrom("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 
   @Test
   void sameInputsAlwaysDeriveSameSagaId() {

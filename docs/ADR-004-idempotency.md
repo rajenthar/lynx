@@ -603,12 +603,38 @@ Problem: Race condition between SELECT and INSERT
 ✗ Not equivalent to API key or token
 ```
 
-**Rate limiting:**
+**Rate limiting (OPEN — not yet designed or built, tracked so it isn't forgotten):**
 ```
-Rate limit by API key, not Idempotency-Key
+Rate limit by API key/userId, not Idempotency-Key
   ✓ Prevents brute-force attacks
   ✓ Limits per-user, not per-request-id
 ```
+Two genuinely different "rate limiting" concerns exist in this system, easy to
+conflate — worth keeping distinct:
+
+1. **JWKS refetch rate-limiting — already handled, nothing to build.**
+   `JwtVerifier.fromJwksUrl(...)` (`lynx-security`) uses Nimbus's
+   `JWKSourceBuilder`, which already rate-limits its own refetch of
+   auth-service's public keys (time-based refresh, plus refetch-on-unknown-
+   `kid` for key rotation, rate-limited so a flood of bogus `kid`s can't
+   hammer the JWKS endpoint). This is internal library behavior, not
+   something this project configures.
+2. **API-level rate limiting (per-user/per-IP request throttling) — NOT
+   built anywhere yet.** No service in this codebase currently limits how
+   often a caller can hit an endpoint. The natural home for this is
+   `api-gateway` (the edge, in front of every other service) — but
+   `api-gateway` is still an empty placeholder module (Phase 1, not yet
+   started). Until it exists, every service (including `ledger-service`)
+   is fully open to being hammered by a misbehaving or malicious caller,
+   same root cause as [other-docs/08 Decision 23]'s missing balance
+   validation — protections this codebase hasn't gotten to yet, not
+   protections it decided against.
+
+**Status: documented, deliberately deferred until `api-gateway` is built.**
+Design not yet started — token-bucket vs. sliding-window, per-user vs.
+per-IP vs. both, where the limit state lives (in-memory per instance vs.
+shared Redis, the same in-memory-vs.-shared tradeoff ADR-007's
+`ServiceTokenProvider` cache already worked through) are all still open.
 
 **Audit trail:**
 ```
@@ -617,6 +643,57 @@ Log every request with Idempotency-Key
   ├─ Retry (same key): log as "cache hit"
   └─ Compliance: Can trace every transfer attempt
 ```
+
+---
+
+## Open Requirement: `saga-orchestrator`'s recovery MUST reuse the original `Idempotency-Key`, never mint a fresh one (not yet built, tracked here)
+
+Everything above proves retries are safe **when the retry presents the same
+`Idempotency-Key` it used the first time** — a live client resubmitting its
+own in-flight request naturally does this, since it's the same request
+object. `saga-orchestrator`'s own recovery/redo loop (ADR-003) is a
+**different case**: it re-drives a stuck phase (e.g. `lock` never got a
+response) as a **brand-new HTTP call**, constructed from scratch, possibly
+long after the original attempt. If that redo generates a **fresh**
+`Idempotency-Key` instead of reusing the original one, both protections in
+this ADR are bypassed entirely:
+
+- The Redis cache lookup (keyed on `userId|key|phase`) misses — different key.
+- The DB's `UNIQUE(saga_id, idempotency_key, entry_type)` constraint doesn't
+  fire either — the tuple is genuinely different (new `idempotency_key`).
+
+Nothing stops the redo from writing a **second, genuinely duplicate** set of
+`LOCK_DR`/`LOCK_CR` legs — silently, with no error, no constraint violation,
+no cache hit. This is a correctness requirement on the CALLER, not something
+`ledger-service` can enforce on its own — `ledger-service`'s only contract is
+"same key → same result"; it has no way to know a given key is a fresh mint
+versus a legitimate reuse.
+
+**Required design (not yet built, since `saga-orchestrator` doesn't exist
+yet):** `saga-orchestrator` must persist the `Idempotency-Key` it generates
+for each phase call — e.g. one column per phase on `saga_state`
+(`hold_idempotency_key`, `lock_idempotency_key`, etc.) — the first time it
+calls that phase, and reuse that **exact same** key on every subsequent
+redo of that phase. A redo is a retry of the same logical attempt, not a new
+one, and must be treated like one.
+
+**Status: documented, not yet implemented** — `saga-orchestrator` itself
+doesn't exist yet; tracked here so this requirement isn't lost by the time
+it's built. See also [DECISIONS.md](DECISIONS.md)'s Known Open Gaps table.
+
+### Related, already-resolved question: does reusing `hold`'s key for `lock` corrupt the DB?
+
+No — asked and worth stating explicitly. `UNIQUE(saga_id, idempotency_key,
+entry_type)` includes `entry_type`, and `HOLD_DR`/`HOLD_CR` are different
+`entry_type` values from `LOCK_DR`/`LOCK_CR`. So a caller mistakenly reusing
+`hold`'s key for the `lock` call would NOT violate the DB constraint at
+all — `lock` would insert its own new rows just fine. The bug this project
+actually found and fixed (java-docs/08, the `SagaPhase` discriminator) was
+purely at the **Redis cache layer**: before the fix, the cache key didn't
+include the phase, so `lock` could return `hold`'s cached *response object*
+without ever reaching the database — a completely different failure mode
+from a DB constraint violation, and the reason the cache key is
+`userId|key|phase`, not just `userId|key`.
 
 ---
 

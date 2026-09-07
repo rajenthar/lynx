@@ -11,18 +11,18 @@ class IdempotencyKeyTest {
 
   @Test
   void acceptsValidUuid() {
-    IdempotencyKey key = IdempotencyKey.of("550e8400-e29b-41d4-a716-446655440000");
+    IdempotencyKey key = IdempotencyKey.derivedFrom("550e8400-e29b-41d4-a716-446655440000");
     assertEquals("550e8400-e29b-41d4-a716-446655440000", key.value());
   }
 
   @Test
   void rejectsMissingKey() {
-    assertThrows(ValidationException.class, () -> IdempotencyKey.of(null));
-    assertThrows(ValidationException.class, () -> IdempotencyKey.of("  "));
+    assertThrows(ValidationException.class, () -> IdempotencyKey.derivedFrom(null));
+    assertThrows(ValidationException.class, () -> IdempotencyKey.derivedFrom("  "));
   }
 
   @Test
   void rejectsNonUuid() {
-    assertThrows(ValidationException.class, () -> IdempotencyKey.of("not-a-uuid"));
+    assertThrows(ValidationException.class, () -> IdempotencyKey.derivedFrom("not-a-uuid"));
   }
 }

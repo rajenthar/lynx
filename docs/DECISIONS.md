@@ -10,6 +10,29 @@ Multi-currency transfers execute as a **3-step ledger-first saga** (HOLD → FX_
 
 ---
 
+## Services Built So Far (tracked so nothing gets missed)
+
+Every real, built-and-tested module in this repo, its status, and where its
+full writeup lives — kept current so no service's existence or state has to
+be re-derived from scratch.
+
+| Module | Status | Docs |
+|---|---|---|
+| `lynx-common` | Built, tested | [other-docs/01](other-docs/01-lynx-common-design-decisions.md) |
+| `lynx-money` | Built, tested | [other-docs/02](other-docs/02-lynx-money-design-decisions.md) |
+| `lynx-security` | Built, tested (`JwtVerifier`, `CorrelationIdFilter`, `ServiceTokenProvider`, `CircuitBreaker`) | [other-docs/03](other-docs/03-lynx-security-design-decisions.md) |
+| `lynx-idempotency` | Built, tested (`IdempotencyGuard`, `InMemoryIdempotencyCache`, `RedisIdempotencyCache`) | [other-docs/04](other-docs/04-lynx-idempotency-design-decisions.md) |
+| `lynx-events` | Built, tested | [other-docs/05](other-docs/05-lynx-events-design-decisions.md) |
+| `lynx-telemetry` | Built, tested | [other-docs/06](other-docs/06-lynx-telemetry-design-decisions.md) |
+| `ledger-service` | Built, tested (15 tests) — HOLD/LOCK/SETTLE/RELEASE + audit trail + locked-rate read, real Postgres via Testcontainers | [other-docs/08](other-docs/08-ledger-service-design-decisions.md) |
+| `fx-rate-service` | Built, tested (14 tests) — idempotent FX execution + rate quoting (with TTL), both behind mock providers; no real caller or real provider yet | [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) |
+| `auth-service` | Not started | — |
+| `saga-orchestrator` | Not started | — |
+| `account-service` | Not started | — |
+| everything else in `services/*` (13 more placeholder dirs) | Not started | — |
+
+---
+
 ## Decision Index
 
 | # | Decision | Instead of | Why (one line) |
@@ -19,6 +42,7 @@ Multi-currency transfers execute as a **3-step ledger-first saga** (HOLD → FX_
 | [ADR-003](ADR-003-saga-orchestrator.md) | Central saga orchestrator (polling) | Event choreography | Explicit flow; single place for state, recovery, and compensation |
 | [ADR-004](ADR-004-idempotency.md) | Idempotency-Key + deterministic saga_id | Random saga_id, cache-only dedup | DB UNIQUE constraint is the safety net that survives crashes |
 | [ADR-005](ADR-005-cqrs-read-model.md) | account-service as pure CQRS projection | Querying ledger for balances | Reads scale independently; ledger write path stays untouched |
+| [ADR-007](ADR-007-internal-service-authentication.md) | Service identity + on-behalf-of userId (ACCEPTED — built and tested in `lynx-security`/`ledger-service`; `auth-service` issuing these tokens is the only piece still open) | Replaying the user's own JWT through every saga phase | A saga's own live JWT expires long before the saga finishes; service calls must authenticate as the service, not impersonate the user |
 
 ---
 
@@ -53,10 +77,28 @@ Multi-currency transfers execute as a **3-step ledger-first saga** (HOLD → FX_
 ```sql
 SELECT * FROM saga_state
 WHERE status = 'HOLDING'          -- one query PER PHASE (never combined + re-checked)
+ORDER BY created_at               -- deterministic scan order — see the SKIP LOCKED note below
 LIMIT 100                         -- batching: pipeline continuously, don't drain 1M rows first
-FOR UPDATE;                       -- pessimistic lock: whole batch claimed atomically
+FOR UPDATE SKIP LOCKED;           -- pessimistic lock: whole batch claimed atomically, no blocking
 ```
-- **FOR UPDATE locks all 100 rows atomically in one query** — no two orchestrator instances ever claim the same rows; waiting instances get the NEXT batch
+- **`FOR UPDATE SKIP LOCKED`, not plain `FOR UPDATE` (fixed — found by inspection, tracked so it
+  doesn't regress):** the two aren't interchangeable, and this doc previously showed plain
+  `FOR UPDATE` while claiming "waiting instances get the NEXT batch" — that specific behavior
+  is what `SKIP LOCKED` delivers, not plain `FOR UPDATE`. Without it, if two orchestrator
+  instances' queries match an overlapping row set (nothing prevented that either, absent the
+  `ORDER BY` — now added), the second instance BLOCKS and WAITS on those specific rows until the
+  first transaction commits, rather than moving on to different, still-available work. That
+  wait doesn't cause double-processing (Postgres re-checks the `WHERE` against the row's
+  now-current state once unblocked, so an already-claimed-and-updated row correctly falls out of
+  the result — `ledger-service`'s own idempotency handling is a backstop for the rare case this
+  still races, e.g. a crash mid-processing after claiming, not the routine path), but it IS
+  wasted time: the whole point of horizontally scaling the orchestrator is instances doing
+  DIFFERENT work in parallel, not one blocking on rows another already grabbed.
+  `SKIP LOCKED` makes a blocked instance skip straight past already-locked rows to the next
+  available ones instead — genuinely zero-wait, zero-overlap batch claiming. The added
+  `ORDER BY created_at` gives concurrent scans a consistent, deterministic order so their
+  batches are far more likely to be disjoint in the first place, rather than relying on
+  `SKIP LOCKED` alone to sort out overlap after the fact.
 - **Multiple stateless orchestrator instances (3+)** scale linearly with zero coordination code — Postgres row locks do the distribution
 - **Polling interval ~100ms** — acceptable vs 600ms saga latency; phantom rows (new sagas arriving mid-batch) are simply picked up next iteration (batching, not starvation)
 - **No CDC/events on saga_state** — that would be circular (orchestrator reacting to its own updates) and reintroduce race conditions. CDC is for domain events only.
@@ -109,7 +151,22 @@ INSERT ledger + INSERT outbox   (same ACID transaction — both or neither)
 
 ## Idempotency (ADR-004)
 
-**The chain:**
+**Scope note (updated — see other-docs/08's migration-numbering note; `ledger-service` isn't deployed yet, so this schema change is folded into its single `V1` migration, not a separate `V7`):** the chain below describes the
+*original* client-facing pattern — where a real end-user's
+`Idempotency-Key` deterministically derives `saga_id` — and it still
+applies exactly as written to the future, not-yet-built
+`transaction-service`'s saga-creation endpoint, the one place a client
+ever actually mints an `Idempotency-Key`. `ledger-service` itself no
+longer has a client-supplied `Idempotency-Key` at all: since ADR-003's
+rate-lock expiry policy means every phase (`hold`/`lock`/`settle`/
+`release`) happens at most once per saga, forever, `ledger`'s and
+`fx_rate_locks`' constraints moved from `UNIQUE(..., idempotency_key,
+...)` to `UNIQUE(user_id, saga_id[, entry_type])` — `(userId, sagaId,
+phase)` is `ledger-service`'s whole write identity now. See
+[other-docs/08](other-docs/08-ledger-service-design-decisions.md)
+Decision 29.
+
+**The chain (as `transaction-service`'s saga-creation endpoint will use it):**
 ```
 Client generates Idempotency-Key (UUID v4, stored client-side, REUSED on retry)
         ↓
@@ -122,7 +179,7 @@ UNIQUE(saga_id, idempotency_key, entry_type) on ledger               ← DB-leve
 - **Client-generated key**: only the client knows "this is the same attempt"; server just enforces
 - **user_id in derivation** (from JWT `sub` claim — a UUID issued by auth-service): two users accidentally sending the same key derive DIFFERENT saga_ids and never block each other
 - **Deterministic saga_id**: retry re-derives the SAME saga_id → constraint fires. A random saga_id would make every retry look new → silent duplicates (system-breaking bug)
-- **Composite UNIQUE, not saga_id alone**: defense-in-depth against hash collisions — a collision with different keys stays allowed and detectable instead of blocking an innocent user (collision odds ~1 in 2^122: acceptable)
+- **Composite UNIQUE, not saga_id alone**: defense-in-depth against hash collisions — a collision with different keys stays allowed and detectable instead of blocking an innocent user (collision odds ~1 in 2^122: acceptable). This applies to EVERY table keyed on `saga_id`, not just `ledger` — found by inspection to be missing on `fx_rate_locks` (`UNIQUE(saga_id)` alone), fixed to `UNIQUE(saga_id, idempotency_key)` (later superseded by `UNIQUE(user_id, saga_id)`, Decision 29 — see other-docs/08's migration-numbering note for why these are no longer separate migration files); see [other-docs/08](other-docs/08-ledger-service-design-decisions.md) Decision 27
 - **entry_type in the constraint**: one saga legitimately writes multiple legs (HOLD_DR + HOLD_CR share saga_id + key); a retry re-inserting the same leg violates → whole transaction rolls back (atomicity)
 
 **Request-handling pattern (API layer):**
@@ -195,9 +252,9 @@ WHERE account_id = :acc AND currency = :cur
 | Mechanism | Where used | What it prevents |
 |---|---|---|
 | SERIALIZABLE isolation | All ledger/saga writes | Dirty reads, phantom reads, anomalies |
-| `SELECT ... FOR UPDATE` | saga_state claiming | Two orchestrators processing the same saga |
-| `FOR UPDATE` + `LIMIT n` | Orchestrator batching | Duplicate batch claims across instances |
-| UNIQUE(saga_id, idempotency_key, entry_type) | ledger | Duplicate money movement on retry |
+| `SELECT ... FOR UPDATE SKIP LOCKED` | saga_state claiming | Two orchestrators processing the same saga — SKIP LOCKED also avoids one instance blocking/wasting time waiting on rows another already claimed |
+| `FOR UPDATE SKIP LOCKED` + `ORDER BY` + `LIMIT n` | Orchestrator batching | Duplicate AND overlapping batch claims across instances |
+| UNIQUE(user_id, saga_id, entry_type) | ledger (was `idempotency_key`-keyed pre-V7, other-docs/08 Decision 29) | Duplicate money movement on retry |
 | Deterministic saga_id | Request → saga mapping | Retries creating "new" sagas |
 | `last_event_id` guard | Read-model consumers | Double-applying redelivered events |
 | Partition key = saga_id | Event topics | Out-of-order event processing per saga |
@@ -216,3 +273,21 @@ WHERE account_id = :acc AND currency = :cur
 | Duplicate rate | 0% |
 | Recovery SLA | < 15 min |
 | Projection drift | 0 (reconciliation-verified) |
+
+---
+
+## Known Open Gaps (tracked so nothing gets forgotten)
+
+Real, identified gaps in the current build — documented deliberately instead
+of silently deferred. Not exhaustive on their own; each links to its full
+writeup.
+
+| Gap | Where it belongs | Tracked in |
+|---|---|---|
+| No API-level rate limiting (per-user/per-IP throttling) anywhere in the system | `api-gateway` (not yet built) | [ADR-004](ADR-004-idempotency.md)'s Security Considerations |
+| `hold` performs no balance validation — no service checks sufficient funds before writing | `account-service` (not yet built) | [other-docs/08](other-docs/08-ledger-service-design-decisions.md) Decision 23 |
+| `auth-service` issuing service-identity tokens; dual-auth-shape acceptance beyond `ledger-service` | `auth-service` (not yet built) | [ADR-007](ADR-007-internal-service-authentication.md)'s open items |
+| Recovery/redo must reuse the SAME `Idempotency-Key` per (saga, phase) — a fresh key per redo bypasses both the cache and the DB's UNIQUE constraint | `saga-orchestrator` (not yet built) | [ADR-004](ADR-004-idempotency.md)'s Open Requirement section |
+| No real FX liquidity-provider integration — `MockFxProvider` is the only implementation | `fx-rate-service` | [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) |
+| No auth wiring on `fx-rate-service` yet (deliberate — no real caller to authenticate) | `fx-rate-service` | [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) Decision 4 |
+| ~~No `expires_at`/TTL on the locked rate~~ **RESOLVED** — `fx-rate-service`'s `GET /v1/fx/quotes` issues it, `FxRateLock.expiresAt` stores it. Enforcement POLICY now decided (release-only, no relock — see ADR-003) but not yet implemented — `saga-orchestrator` doesn't exist yet | `saga-orchestrator` (not yet built) | [ADR-003](ADR-003-saga-orchestrator.md)'s rate-lock expiry section, [other-docs/08](other-docs/08-ledger-service-design-decisions.md) Decision 24, [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) Decision 6 |

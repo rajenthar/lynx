@@ -1,0 +1,213 @@
+openapi: 3.0.3
+info:
+  title: Lynx fx-rate-service API
+  description: >
+    Quoting + idempotent FX trade execution behind a pluggable FxProvider
+    (MockFxProvider today — see other-docs/09-fx-rate-service-design-decisions.md).
+    No auth wired yet — deliberate, this service has no real caller today.
+  version: "0.1.0"
+  contact:
+    name: Lynx
+servers:
+  - url: http://localhost:8082
+    description: Local development
+
+tags:
+  - name: fx
+    description: Quoting and trade execution
+
+paths:
+  /v1/fx/quotes:
+    get:
+      tags: [fx]
+      summary: Get a rate quote, valid for a short TTL
+      description: >
+        Cheap, ephemeral, non-committal — NOT durably stored, no idempotency
+        guard (a caller can request many and act on none). The commitment
+        happens at POST /v1/fx/executions, not here.
+      operationId: quote
+      parameters:
+        - name: amount
+          in: query
+          required: true
+          schema:
+            type: number
+            format: decimal
+        - name: fromCurrency
+          in: query
+          required: true
+          schema:
+            type: string
+            example: SGD
+        - name: toCurrency
+          in: query
+          required: true
+          schema:
+            type: string
+            example: USD
+      responses:
+        '200':
+          description: A quote, valid until `expiresAt`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxQuoteResponse'
+              example:
+                quoteId: 7a1b2c3d-1234-4562-b3fc-2c963f66afa6
+                rate: 0.7412
+                fromCurrency: SGD
+                toCurrency: USD
+                expiresAt: "2026-08-25T10:01:00Z"
+        '422':
+          description: No mock rate available for this currency pair.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                code: CURRENCY_NOT_SUPPORTED
+                message: "Currency not supported: SGD -> JPY"
+                correlationId: b3e1c9a0-1234-4562-b3fc-2c963f66afa6
+                timestamp: "2026-08-25T10:00:00Z"
+                details: []
+
+  /v1/fx/executions:
+    post:
+      tags: [fx]
+      summary: Execute an FX trade — idempotent per executionId
+      description: >
+        `executionId` IS the idempotency key for this request — client-
+        generated, unique, reused unchanged on every retry of the same
+        logical attempt (same idiom as ledger-service's own
+        Idempotency-Key discipline, ADR-004). Retrying with the same
+        executionId always returns the SAME result, never a duplicate trade.
+      operationId: execute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FxExecutionRequest'
+            example:
+              executionId: 9f8e7d6c-1234-4562-b3fc-2c963f66afa6
+              sagaId: 8f14e45f-ceea-467e-adc0-8fb2a1a2b7f8
+              amount: 100.00
+              fromCurrency: SGD
+              toCurrency: USD
+              requestedRate: 0.7412
+      responses:
+        '200':
+          description: >
+            The execution's outcome (EXECUTED or FAILED — both terminal;
+            see other-docs/09 Decision 3 for why there is no PENDING state
+            at rest).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxExecutionResponse'
+
+  /v1/fx/executions/{executionId}:
+    get:
+      tags: [fx]
+      summary: Read back a previously recorded execution
+      operationId: getExecution
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The recorded execution.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxExecutionResponse'
+        '404':
+          description: No execution recorded for this executionId — it was never attempted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+components:
+  schemas:
+    FxQuoteResponse:
+      type: object
+      properties:
+        quoteId:
+          type: string
+          format: uuid
+        rate:
+          type: number
+          format: decimal
+        fromCurrency:
+          type: string
+        toCurrency:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    FxExecutionRequest:
+      type: object
+      required: [executionId, sagaId, amount, fromCurrency, toCurrency, requestedRate]
+      properties:
+        executionId:
+          type: string
+          format: uuid
+        sagaId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: decimal
+        fromCurrency:
+          type: string
+        toCurrency:
+          type: string
+        requestedRate:
+          type: number
+          format: decimal
+
+    FxExecutionResponse:
+      type: object
+      properties:
+        executionId:
+          type: string
+          format: uuid
+        sagaId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [EXECUTED, FAILED]
+        filledRate:
+          type: number
+          format: decimal
+          nullable: true
+          description: Set only when status = EXECUTED.
+        failureReason:
+          type: string
+          nullable: true
+          description: Set only when status = FAILED.
+
+    ApiError:
+      type: object
+      description: Uniform error shape returned by every Lynx service (lynx-common).
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        correlationId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: array
+          items:
+            type: string
