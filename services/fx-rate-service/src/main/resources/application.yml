@@ -1,0 +1,29 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: fx-rate-service
+  datasource:
+    # Same shared local Postgres as every other service (infra's lynx-postgres
+    # container, port 5433) — this service owns its own tables (fx_executions)
+    # within it, no separate database needed.
+    url: jdbc:postgresql://localhost:5433/lynx
+    username: lynx
+    password: lynx
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{sagaId:-},%X{correlationId:-}]"

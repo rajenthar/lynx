@@ -29,5 +29,52 @@
       <artifactId>lynx-common</artifactId>
       <version>0.1.0</version>
     </dependency>
+
+    <!--
+      Redis client for RedisIdempotencyCache. Raw Jedis, not spring-data-redis:
+      this module stays framework-agnostic (see other-docs/04, "no servlet/HTTP
+      extraction") — a plain client keeps it usable from a non-Spring service
+      too, same reasoning as lynx-security pinning nimbus-jose-jwt directly.
+      Version pinned explicitly: not covered by the Spring Boot BOM.
+    -->
+    <dependency>
+      <groupId>redis.clients</groupId>
+      <artifactId>jedis</artifactId>
+      <version>5.1.3</version>
+    </dependency>
+
+    <!-- JSON (de)serialization of cached responses; version managed by the Spring Boot BOM -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+    </dependency>
+
+    <!-- Real Redis via Testcontainers for RedisIdempotencyCacheTest -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>testcontainers-bom</artifactId>
+        <version>1.20.1</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 </project>

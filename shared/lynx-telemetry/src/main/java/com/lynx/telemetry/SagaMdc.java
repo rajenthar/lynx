@@ -15,8 +15,8 @@ import org.slf4j.MDC;
  * HTTP requests, but for saga processing instead.
  *
  * <p>Callers MUST clear in a {@code finally} block — see {@link MdcScope} for a
- * reusable, exception-safe way to do that instead of hand-rolling try/finally
- * at every call site.
+ * reusable, {@code try}-with-resources way to do that instead of hand-rolling
+ * try/finally at every call site (real usage: {@code LedgerController}).
  */
 public final class SagaMdc {
 

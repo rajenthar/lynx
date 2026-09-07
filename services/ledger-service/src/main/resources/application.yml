@@ -1,0 +1,56 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: ledger-service
+  datasource:
+    # Port 5433, not Postgres's default 5432: this machine also runs a
+    # native (non-Docker) Postgres bound to 5432, which would otherwise
+    # silently receive this connection instead of infra's lynx-postgres
+    # container. infra/docker-compose.local.yml's postgres service is
+    # started with POSTGRES_PORT=5433 to avoid that collision.
+    url: jdbc:postgresql://localhost:5433/lynx
+    username: lynx
+    password: lynx
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0   # trace every request locally; production would sample down
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics
+
+# %X{traceId}/%X{spanId} are populated automatically by micrometer-tracing-bridge-otel
+# per request (Spring Boot's documented MDC log-correlation behavior) — no
+# ledger-service code sets them; %X{sagaId}/%X{correlationId} ARE Lynx's own
+# (SagaMdc/CorrelationIdFilter). All four appear on every log line.
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-},%X{sagaId:-},%X{correlationId:-}]"
+
+lynx:
+  security:
+    # Placeholder: auth-service does not exist yet. Tests wire an in-memory
+    # JWKS directly instead of hitting this URL (see JwtVerifierTest's pattern).
+    jwks-url: http://localhost:8080/auth/.well-known/jwks.json
+    issuer: https://auth.lynx
+    audience: lynx-api
+  redis:
+    # infra/docker-compose.local.yml's lynx-redis container, default port.
+    host: localhost
+    port: 6379

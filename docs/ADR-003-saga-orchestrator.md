@@ -568,6 +568,67 @@ Guaranteed by:
 
 ---
 
+## Implementation Details: rate-lock expiry policy (DECIDED — release only, for now)
+
+Worked through by direct Q&A, before `saga-orchestrator` or `fx-rate-service`'s
+real provider integration exist. Once `fx-rate-service`'s `GET /v1/fx/quotes`
+issues a rate with a TTL (other-docs/09 Decision 6) and `ledger-service`'s
+`FxRateLock.expiresAt` stores it (other-docs/08 Decision 24), *something*
+has to decide what happens when a saga is still sitting on an expired lock
+when it's time to `settle`. Two candidate policies were considered:
+
+### Option A: silently re-lock within the SAME saga — REJECTED for now
+
+Get a fresh quote, write a SECOND `LOCK_DR`/`LOCK_CR` pair for the same
+`sagaId`. Rejected for two independent reasons:
+
+1. **Regulatory/consumer-trust, not just technical.** Most regulated
+   payment/FX platforms (PSD2, UK FCA-style rules) require the customer be
+   shown the actual rate before execution — silently substituting a
+   different (possibly worse) rate after the fact, even automatically, is
+   a real disclosure problem, not just an engineering inconvenience.
+2. **A genuine, hard concurrency problem, not just complexity for its own
+   sake.** `UNIQUE(userId, sagaId, entry_type, idempotency_key)` only
+   catches a collision when the *idempotency key itself* matches. Two
+   `saga-orchestrator` instances racing to relock the SAME saga (e.g. one
+   crashes mid-request after sending its key, another later legitimately
+   claims the same saga and mints its OWN new key) can both succeed —
+   `idempotency_key` differing means the constraint doesn't fire, and you
+   get a genuine double-lock (money moved into `FX_LOCK` twice). The
+   `FOR UPDATE SKIP LOCKED` claiming mechanism above prevents this in the
+   *normal* concurrent-polling case, but not the crash-then-reclaim case.
+   Closing that gap properly needs a compare-and-swap/supersession pattern
+   on the lock itself (mirroring the account-balance
+   `UPDATE ... WHERE available >= ?` idiom) — real, addressable, but
+   genuine added complexity for a feature not yet needed.
+
+### Option B: fail and release, retry (if at all) as a brand-new saga — CHOSEN, for now
+
+On an expired lock, `release` the existing saga fully (already-built,
+already-safe compensation — no new mechanism). If a retry is wanted, it is
+a **completely new saga**: fresh `sagaId`, fresh `Idempotency-Key`, as if
+it were a brand-new user-initiated request — with a plain
+`retriedFromSagaId` field on the new saga's `saga_state` row purely for
+audit/traceability (not a uniqueness-bearing key, no contention on it).
+
+This sidesteps Option A's concurrency problem entirely: a new `sagaId` has
+no shared "current attempt" for two racing actors to fight over — the
+same, already-proven single-saga idempotency protection just applies to
+it fresh, with zero special-casing. The only sequencing care needed (not
+a correctness bug, an ordering detail): the original saga's `release`
+should complete before (or atomically with) the new saga's `hold`, so
+funds aren't transiently double-held across both sagas.
+
+**Status: Option B (release-and-new-saga) is the decided direction for
+when this is eventually built.** `saga-orchestrator` doesn't exist yet, so
+nothing here is implemented — this section exists so the reasoning and
+the choice aren't re-litigated from scratch later. The "retry as a new
+saga" half is explicitly **deferred** — not designed in detail, not
+scheduled — only the release-on-expiry half is the settled behavior to
+build first.
+
+---
+
 ## Consequences
 
 ### Positive
@@ -670,7 +731,8 @@ orchestrator {
 
 - [ADR-001: Ledger-first Saga](ADR-001-ledger-first-saga.md) — Saga phases and pessimistic locking
 - [ADR-002: Transactional Outbox](ADR-002-transactional-outbox.md) — How events are published
-- [ADR-004: Idempotency via Idempotency-Key](ADR-004-idempotency.md) — Idempotency for retries
+- [ADR-004: Idempotency via Idempotency-Key](ADR-004-idempotency.md) — Idempotency for retries. **Open requirement for this orchestrator specifically:** its recovery/redo loop MUST persist and reuse the same `Idempotency-Key` per (saga, phase) across redos — a fresh key per redo attempt bypasses both the cache and the DB's UNIQUE constraint, since neither is scoped on anything except the key itself. See ADR-004's "Open Requirement" section.
+- [ADR-007: Internal Service-to-Service Authentication](ADR-007-internal-service-authentication.md) — **open, unresolved:** how this orchestrator authenticates itself when it calls `ledger-service`'s phase endpoints, given the original end-user's JWT is long gone by the time later phases run
 
 ---
 

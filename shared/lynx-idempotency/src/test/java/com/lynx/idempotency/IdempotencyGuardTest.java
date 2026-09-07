@@ -17,7 +17,8 @@ class IdempotencyGuardTest {
 
   private static final String USER = "user-123";
   private static final IdempotencyKey KEY =
-      IdempotencyKey.of("550e8400-e29b-41d4-a716-446655440000");
+      IdempotencyKey.derivedFrom("550e8400-e29b-41d4-a716-446655440000");
+  private static final String OPERATION = "HOLD";
 
   private InMemoryIdempotencyCache cache;
   private IdempotencyGuard guard;
@@ -32,7 +33,7 @@ class IdempotencyGuardTest {
 
   @Test
   void firstRequestRunsOperationAndCaches() {
-    String result = guard.execute(USER, KEY, String.class,
+    String result = guard.execute(USER, KEY, OPERATION, String.class,
         () -> {
           operationRuns.incrementAndGet();
           return "transfer-accepted";
@@ -43,19 +44,19 @@ class IdempotencyGuardTest {
     assertEquals(1, operationRuns.get());
     // response is now cached for retries
     assertEquals("transfer-accepted",
-        cache.get(IdempotencyGuard.cacheKey(USER, KEY), String.class).orElseThrow());
+        cache.get(IdempotencyGuard.cacheKey(USER, KEY, OPERATION), String.class).orElseThrow());
   }
 
   @Test
   void retryIsServedFromCacheWithoutRerunningOperation() {
-    guard.execute(USER, KEY, String.class,
+    guard.execute(USER, KEY, OPERATION, String.class,
         () -> {
           operationRuns.incrementAndGet();
           return "original";
         },
         Optional::empty);
 
-    String retried = guard.execute(USER, KEY, String.class,
+    String retried = guard.execute(USER, KEY, OPERATION, String.class,
         () -> {
           operationRuns.incrementAndGet();
           return "MUST-NOT-HAPPEN";
@@ -70,7 +71,7 @@ class IdempotencyGuardTest {
   void duplicateWithCacheMissRecoversOriginalFromDatabase() {
     // Crash-before-cache scenario: first attempt COMMITTED to the DB but died
     // before cache.put — so the cache is empty, yet the DB knows the truth.
-    String result = guard.execute(USER, KEY, String.class,
+    String result = guard.execute(USER, KEY, OPERATION, String.class,
         () -> {
           throw new DuplicateRequestException("UNIQUE(saga_id, idempotency_key) violated");
         },
@@ -79,7 +80,7 @@ class IdempotencyGuardTest {
     assertEquals("original-from-db", result);
     // recovered original is backfilled into the cache for the NEXT retry
     assertEquals("original-from-db",
-        cache.get(IdempotencyGuard.cacheKey(USER, KEY), String.class).orElseThrow());
+        cache.get(IdempotencyGuard.cacheKey(USER, KEY, OPERATION), String.class).orElseThrow());
   }
 
   @Test
@@ -87,7 +88,7 @@ class IdempotencyGuardTest {
     // Concurrent duplicate: original still in flight, its transaction not yet
     // committed — there IS no result to replay. Client should retry shortly.
     ConflictException e = assertThrows(ConflictException.class,
-        () -> guard.execute(USER, KEY, String.class,
+        () -> guard.execute(USER, KEY, OPERATION, String.class,
             () -> {
               throw new DuplicateRequestException("constraint violated");
             },
@@ -98,10 +99,28 @@ class IdempotencyGuardTest {
 
   @Test
   void differentUsersWithSameKeyDoNotShareCacheEntries() {
-    guard.execute("user-A", KEY, String.class, () -> "response-A", Optional::empty);
-    String resultB = guard.execute("user-B", KEY, String.class, () -> "response-B", Optional::empty);
+    guard.execute("user-A", KEY, OPERATION, String.class, () -> "response-A", Optional::empty);
+    String resultB = guard.execute("user-B", KEY, OPERATION, String.class, () -> "response-B", Optional::empty);
 
     // user-B ran its own operation — it did NOT receive user-A's cached response
     assertEquals("response-B", resultB);
+  }
+
+  @Test
+  void sameUserAndKeyAcrossDifferentOperationsDoNotShareCacheEntries() {
+    // Simulates a caller reusing the same Idempotency-Key across two DIFFERENT
+    // logical operations for the same saga (e.g. ledger-service's hold vs.
+    // lock) — a caller mistake, but one the cache must not silently reward by
+    // replaying the wrong operation's cached response.
+    guard.execute(USER, KEY, "HOLD", String.class, () -> "hold-response", Optional::empty);
+    String lockResult = guard.execute(USER, KEY, "LOCK", String.class,
+        () -> {
+          operationRuns.incrementAndGet();
+          return "lock-response";
+        },
+        Optional::empty);
+
+    assertEquals("lock-response", lockResult);   // LOCK actually ran, not replayed from HOLD
+    assertEquals(1, operationRuns.get());
   }
 }

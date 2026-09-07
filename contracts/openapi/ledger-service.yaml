@@ -1,0 +1,611 @@
+openapi: 3.0.3
+info:
+  title: Lynx ledger-service API
+  description: >
+    Append-only double-entry ledger + transactional outbox. Executes the four
+    ADR-001 saga phases (HOLD/LOCK/SETTLE/RELEASE) as synchronous commands,
+    each idempotent per `(userId, sagaId, phase)` — no client-supplied
+    `Idempotency-Key` header (migration V7, other-docs/08 Decision 29):
+    ADR-003's rate-lock expiry policy means each phase happens at most once
+    per saga, forever, so that triple is a complete identity on its own —
+    plus a read-only audit trail. See
+    docs/java-docs/08-deep-dive-hold-request-flow.md for a full walkthrough
+    of one request end to end.
+  version: "0.1.0"
+  contact:
+    name: Lynx
+servers:
+  - url: http://localhost:8081
+    description: Local development
+
+tags:
+  - name: ledger
+    description: Saga-phase commands and audit trail
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/ledger/sagas/{sagaId}/hold:
+    post:
+      tags: [ledger]
+      summary: HOLD phase — reserve funds from an account
+      description: >
+        Writes HOLD_DR(fromAccountId, amount) / HOLD_CR(HOLD_POOL, amount) and
+        publishes a TransferHeld outbox event.
+      operationId: hold
+      parameters:
+        - $ref: '#/components/parameters/SagaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HoldRequest'
+            example:
+              fromAccountId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              amount: 100.00
+              currencyCode: SGD
+      responses:
+        '200':
+          $ref: '#/components/responses/LedgerPhaseResponseOk'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/DuplicateRequest'
+
+  /v1/ledger/sagas/{sagaId}/lock:
+    post:
+      tags: [ledger]
+      summary: LOCK phase — lock in the FX rate for this transfer
+      description: >
+        Writes LOCK_DR(HOLD_POOL, lockedAmount) / LOCK_CR(FX_LOCK, lockedAmount)
+        and publishes a RateLocked outbox event.
+      operationId: lock
+      parameters:
+        - $ref: '#/components/parameters/SagaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LockRequest'
+            example:
+              lockedAmount: 100.00
+              currencyCode: SGD
+              fromCurrency: SGD
+              toCurrency: USD
+              rate: 0.74
+              rateExpiresAt: "2026-07-27T10:17:00Z"
+      responses:
+        '200':
+          $ref: '#/components/responses/LedgerPhaseResponseOk'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/DuplicateRequest'
+
+  /v1/ledger/sagas/{sagaId}/settle:
+    post:
+      tags: [ledger]
+      summary: SETTLE phase — convert and credit the recipient
+      description: >
+        Writes SETTLE_DR(FX_LOCK, debited) / SETTLE_CR(toAccountId, credited)
+        and publishes a TransferSettled outbox event. `debited` and `credited`
+        are deliberately different amounts/currencies — this is the one phase
+        where the DR/CR legs are NOT required to match (the FX conversion
+        itself).
+      operationId: settle
+      parameters:
+        - $ref: '#/components/parameters/SagaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettleRequest'
+            example:
+              fromAccountId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              toAccountId: b2c3d4e5-1234-4562-b3fc-2c963f66afa6
+              debitedAmount: 100.00
+              debitedCurrency: SGD
+              creditedAmount: 74.00
+              creditedCurrency: USD
+      responses:
+        '200':
+          $ref: '#/components/responses/LedgerPhaseResponseOk'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/DuplicateRequest'
+
+  /v1/ledger/sagas/{sagaId}/release:
+    post:
+      tags: [ledger]
+      summary: RELEASE phase — compensate a saga that couldn't complete
+      description: >
+        Compensation, not a rollback: writes RELEASE_DR(sourcePool, amount) /
+        RELEASE_CR(accountId, amount) as NEW append-only rows (the original
+        HOLD/LOCK rows are never edited or deleted) and publishes a
+        TransferFailed outbox event. Uses the SAME sagaId as the saga being
+        compensated. `sourcePool` is determined automatically by inspecting
+        this saga's existing ledger rows — HOLD_POOL if `lock` never
+        succeeded, FX_LOCK if it did (lock moves the money there) — never
+        hardcoded, since debiting the wrong pool would silently corrupt that
+        system account's balance even though the caller-visible result looks
+        correct.
+      operationId: release
+      parameters:
+        - $ref: '#/components/parameters/SagaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseRequest'
+            example:
+              accountId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              amount: 100.00
+              currencyCode: SGD
+              reason: FX rate lock expired before settlement
+      responses:
+        '200':
+          $ref: '#/components/responses/LedgerPhaseResponseOk'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >
+            Either a duplicate request (original still in flight), OR
+            settle already completed for this saga — the money already
+            left FX_LOCK for the recipient, so there is nothing left in
+            either system account for release to reverse.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                duplicateRequest:
+                  summary: Duplicate request, original still in flight
+                  value:
+                    code: DUPLICATE_REQUEST
+                    message: "Duplicate request for idempotency key: 8f14e45f-ceea-467e-adc0-8fb2a1a2b7f8"  # this is the sagaId — see LedgerController.writePhase
+                    correlationId: b3e1c9a0-1234-4562-b3fc-2c963f66afa6
+                    timestamp: "2026-07-27T10:16:00Z"
+                    details: []
+                alreadySettled:
+                  summary: Settle already completed — nothing left to reverse
+                  value:
+                    code: CONFLICT
+                    message: "Cannot release saga 8f14e45f-...: settle already completed — funds already transferred to the recipient, nothing left to reverse"
+                    correlationId: b3e1c9a0-1234-4562-b3fc-2c963f66afa6
+                    timestamp: "2026-07-27T10:16:00Z"
+                    details: []
+
+  /v1/ledger/sagas/{sagaId}/rate:
+    get:
+      tags: [ledger]
+      summary: The FX rate this saga locked in during LOCK, read back from the ledger
+      description: >
+        Added so SETTLE (a separate, later request) can find out which rate
+        this saga locked in without decoding another phase's outbox event
+        payload — the rate is persisted in its own `fx_rate_locks` table,
+        one row per saga (migration V1, see other-docs/08 Decision 24 for
+        why it isn't on the LOCK_DR/LOCK_CR ledger rows themselves). Scoped
+        to the caller's userId (other-docs/08 Decision 31): a saga that
+        belongs to a different user reads back as 404, same as a saga that
+        never reached LOCK at all.
+      operationId: lockedRate
+      parameters:
+        - $ref: '#/components/parameters/SagaId'
+        - $ref: '#/components/parameters/OnBehalfOfUserIdQuery'
+      responses:
+        '200':
+          description: The locked rate for this saga.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockedRateView'
+              example:
+                rate: 0.7412
+                fromCurrency: SGD
+                toCurrency: USD
+                expiresAt: "2026-07-27T10:17:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: >
+            This saga never reached LOCK for this user — also the response
+            when the saga belongs to a different user entirely, so this
+            endpoint can't be used to probe for other users' saga ids.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                code: NOT_FOUND
+                message: "No LOCK phase recorded for saga 8f14e45f-..."
+                correlationId: b3e1c9a0-1234-4562-b3fc-2c963f66afa6
+                timestamp: "2026-07-27T10:16:00Z"
+                details: []
+
+  /v1/ledger/sagas/{sagaId}:
+    get:
+      tags: [ledger]
+      summary: Audit trail — every ledger leg written for this saga, in order
+      description: >
+        Scoped to the caller's userId, not just sagaId (other-docs/08
+        Decision 31): a saga that belongs to a different user reads back
+        as an empty list, not that other user's real legs.
+      operationId: auditTrail
+      parameters:
+        - $ref: '#/components/parameters/SagaId'
+        - $ref: '#/components/parameters/OnBehalfOfUserIdQuery'
+      responses:
+        '200':
+          description: >
+            Ledger legs for this saga, oldest first — empty if this saga
+            doesn't exist, or belongs to a different user.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerLegView'
+              example:
+                - entryType: HOLD_DR
+                  accountId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                  amount: 100.00
+                  currency: SGD
+                - entryType: HOLD_CR
+                  accountId: 00000000-0000-0000-0000-000000000001
+                  amount: 100.00
+                  currency: SGD
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /actuator/health:
+    get:
+      tags: [ledger]
+      summary: Health check (no auth required)
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: UP
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        RS256-signed JWT, independently verified against the JWKS endpoint
+        configured in `lynx.security.jwks-url` (defense-in-depth). For an
+        ordinary end-user token, the caller identity used for saga_id
+        derivation comes from this token's own `sub` claim. For a caller
+        whose token carries the `internal-service` role (ADR-007 Option C —
+        e.g. saga-orchestrator presenting its own service-identity token),
+        identity instead comes from the request body's `onBehalfOfUserId`
+        field, trusted only because the caller itself was already verified
+        here — see each request schema's `onBehalfOfUserId` description.
+        Excluded for `/actuator/**`.
+
+  parameters:
+    SagaId:
+      name: sagaId
+      in: path
+      required: true
+      description: The saga this ledger write/read belongs to (audit-trail grouping key).
+      schema:
+        type: string
+        format: uuid
+    OnBehalfOfUserIdQuery:
+      name: onBehalfOfUserId
+      in: query
+      required: false
+      description: >
+        Same ADR-007 Option C on-behalf-of semantics as the write endpoints'
+        `onBehalfOfUserId` request-body field (see
+        `#/components/schemas/OnBehalfOfUserId`) — a query param here
+        instead, since a GET has no body. Both this endpoint's read AND its
+        authorization are scoped to the resulting userId (other-docs/08
+        Decision 31): a caller only ever sees a saga that belongs to them.
+      schema:
+        type: string
+        nullable: true
+  schemas:
+    HoldRequest:
+      type: object
+      required: [fromAccountId, amount, currencyCode]
+      properties:
+        fromAccountId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: decimal
+          example: 100.00
+        currencyCode:
+          type: string
+          example: SGD
+          description: ISO-4217 currency code.
+        onBehalfOfUserId:
+          $ref: '#/components/schemas/OnBehalfOfUserId'
+
+    LockRequest:
+      type: object
+      required: [lockedAmount, currencyCode, fromCurrency, toCurrency, rate, rateExpiresAt]
+      properties:
+        lockedAmount:
+          type: number
+          format: decimal
+        currencyCode:
+          type: string
+          example: SGD
+        fromCurrency:
+          type: string
+          example: SGD
+        toCurrency:
+          type: string
+          example: USD
+        rate:
+          type: number
+          format: decimal
+          description: Dimensionless exchange rate (toCurrency per fromCurrency unit).
+        rateExpiresAt:
+          type: string
+          format: date-time
+          description: >
+            When this quoted rate's promise stops being honorable — sourced
+            from fx-rate-service's `GET /v1/fx/quotes` response (its TTL),
+            not computed by ledger-service. Stored and exposed via
+            `GET /v1/ledger/sagas/{sagaId}/rate`, never enforced here —
+            deciding what to do with an expired lock is saga-orchestrator's
+            job.
+        onBehalfOfUserId:
+          $ref: '#/components/schemas/OnBehalfOfUserId'
+
+    SettleRequest:
+      type: object
+      required: [fromAccountId, toAccountId, debitedAmount, debitedCurrency, creditedAmount, creditedCurrency]
+      properties:
+        fromAccountId:
+          type: string
+          format: uuid
+        toAccountId:
+          type: string
+          format: uuid
+        debitedAmount:
+          type: number
+          format: decimal
+        debitedCurrency:
+          type: string
+          example: SGD
+        creditedAmount:
+          type: number
+          format: decimal
+        creditedCurrency:
+          type: string
+          example: USD
+        onBehalfOfUserId:
+          $ref: '#/components/schemas/OnBehalfOfUserId'
+
+    ReleaseRequest:
+      type: object
+      required: [accountId, amount, currencyCode, reason]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: decimal
+        currencyCode:
+          type: string
+          example: SGD
+        reason:
+          type: string
+          example: FX rate lock expired before settlement
+        onBehalfOfUserId:
+          $ref: '#/components/schemas/OnBehalfOfUserId'
+
+    OnBehalfOfUserId:
+      type: string
+      nullable: true
+      description: >
+        ADR-007 Option C's on-behalf-of field. Only meaningful when the
+        caller's bearer token carries the `internal-service` role: then it
+        MUST be present, and becomes the userId used for saga_id derivation
+        — trusted because the caller itself was already verified as an
+        internal service. An ordinary end-user token MUST leave this null;
+        supplying it anyway is rejected with 403 (only a proven internal
+        service may assert who it's acting on behalf of). A service token
+        omitting it is rejected with 401.
+
+    LockedRateView:
+      type: object
+      description: The FX rate this saga locked in during LOCK, read back from the ledger.
+      properties:
+        rate:
+          type: number
+          format: decimal
+        fromCurrency:
+          type: string
+          example: SGD
+        toCurrency:
+          type: string
+          example: USD
+        expiresAt:
+          type: string
+          format: date-time
+
+    EntryType:
+      type: string
+      enum:
+        - HOLD_DR
+        - HOLD_CR
+        - LOCK_DR
+        - LOCK_CR
+        - SETTLE_DR
+        - SETTLE_CR
+        - RELEASE_DR
+        - RELEASE_CR
+
+    LedgerLegView:
+      type: object
+      properties:
+        entryType:
+          $ref: '#/components/schemas/EntryType'
+        accountId:
+          type: string
+          format: uuid
+          description: >
+            Either a real account or a well-known system clearing account
+            (HOLD_POOL = 00000000-0000-0000-0000-000000000001,
+            FX_LOCK = 00000000-0000-0000-0000-000000000002).
+        amount:
+          type: number
+          format: decimal
+        currency:
+          type: string
+          example: SGD
+
+    LedgerPhaseResponse:
+      type: object
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        legs:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerLegView'
+          minItems: 2
+          maxItems: 2
+          description: Always exactly 2 legs — one DR, one CR (ADR-001 double-entry invariant).
+
+    ApiError:
+      type: object
+      description: Uniform error shape returned by every Lynx service (lynx-common).
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - NOT_FOUND
+            - CONFLICT
+            - DUPLICATE_REQUEST
+            - INSUFFICIENT_FUNDS
+            - CURRENCY_NOT_SUPPORTED
+            - LIMIT_EXCEEDED
+            - RATE_LIMITED
+            - INTERNAL_ERROR
+            - SAGA_FAILED
+            - DOWNSTREAM_UNAVAILABLE
+          description: Stable contract value — clients switch on this, never on `message`.
+        message:
+          type: string
+        correlationId:
+          type: string
+          description: Echoes X-Correlation-ID; report this value for support/tracing.
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: array
+          items:
+            type: string
+
+  responses:
+    LedgerPhaseResponseOk:
+      description: Phase written (or, on retry, the original attempt's result replayed).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LedgerPhaseResponse'
+
+    ValidationError:
+      description: >
+        Malformed request — e.g. an amount with more precision than the
+        currency allows.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    Unauthorized:
+      description: >
+        Missing/invalid/expired bearer token. Written directly by
+        JwtAuthFilter (runs before DispatcherServlet), in the same ApiError
+        shape as every other error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: UNAUTHORIZED
+            message: "Missing Authorization: Bearer <jwt> header"
+            correlationId: b3e1c9a0-1234-4562-b3fc-2c963f66afa6
+            timestamp: "2026-07-27T10:16:00Z"
+            details: []
+
+    Forbidden:
+      description: >
+        An ordinary end-user token attempted to supply onBehalfOfUserId —
+        only a caller whose token carries the internal-service role may
+        assert who it's acting on behalf of.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: FORBIDDEN
+            message: "Only an internal-service caller may assert onBehalfOfUserId"
+            correlationId: b3e1c9a0-1234-4562-b3fc-2c963f66afa6
+            timestamp: "2026-07-27T10:16:00Z"
+            details: []
+
+    DuplicateRequest:
+      description: >
+        A duplicate was detected by the database's UNIQUE(userId, sagaId,
+        entry_type) constraint, but the original attempt's result isn't
+        readable yet (still in flight, transaction not committed). Retry
+        the same request shortly — it will then return 200 with the
+        original's result instead.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: DUPLICATE_REQUEST
+            message: "Duplicate request for idempotency key: 8f14e45f-ceea-467e-adc0-8fb2a1a2b7f8"  # this is the sagaId — see LedgerController.writePhase
+            correlationId: b3e1c9a0-1234-4562-b3fc-2c963f66afa6
+            timestamp: "2026-07-27T10:16:00Z"
+            details: []
