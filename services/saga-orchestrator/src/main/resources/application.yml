@@ -1,0 +1,60 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: saga-orchestrator
+  datasource:
+    # Same shared local Postgres as every other service (port 5433, avoiding
+    # a collision with a native, non-Docker Postgres on this machine bound
+    # to 5432 — see ledger-service's own application.yml for the full note).
+    url: jdbc:postgresql://localhost:5433/lynx
+    username: lynx
+    password: lynx
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-},%X{sagaId:-},%X{correlationId:-}]"
+
+lynx:
+  security:
+    # Placeholder: auth-service does not exist yet — same as every other
+    # service's application.yml. Tests wire an in-memory JWKS directly.
+    jwks-url: http://localhost:8080/auth/.well-known/jwks.json
+    issuer: https://auth.lynx
+    audience: lynx-api
+  # ADR-007: this service's OWN identity when calling ledger-service/
+  # fx-rate-service. auth-service's token endpoint doesn't exist yet either
+  # — same placeholder status as jwks-url above. Tests mock
+  # ServiceTokenProvider's HttpClient directly (see ServiceTokenProviderTest's
+  # own pattern), never hit this URL for real.
+  service-token:
+    token-endpoint: http://localhost:8080/auth/token
+    client-id: saga-orchestrator
+    client-secret: placeholder-not-a-real-secret
+  clients:
+    ledger-service:
+      base-url: http://localhost:8081
+    fx-rate-service:
+      base-url: http://localhost:8082

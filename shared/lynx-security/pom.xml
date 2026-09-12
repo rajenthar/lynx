@@ -62,5 +62,22 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>
+
+    <!--
+      Guards ServiceTokenProvider's token-endpoint fetch. Replaced this
+      library's own hand-rolled CircuitBreaker (deleted) — same reasoning
+      as saga-orchestrator's downstream-call breakers (other-docs/10
+      Decision 8): one circuit-breaker implementation in the codebase
+      rather than two, once the ONLY reason the hand-rolled one existed
+      (avoiding a dependency for something this simply stated) stopped
+      applying — a second, real caller (saga-orchestrator) already needed
+      resilience4j for its own breakers, so keeping this one hand-rolled
+      just for symmetry no longer had a payoff.
+    -->
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-circuitbreaker</artifactId>
+      <version>2.2.0</version>
+    </dependency>
   </dependencies>
 </project>

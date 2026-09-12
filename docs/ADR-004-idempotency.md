@@ -646,7 +646,32 @@ Log every request with Idempotency-Key
 
 ---
 
-## Open Requirement: `saga-orchestrator`'s recovery MUST reuse the original `Idempotency-Key`, never mint a fresh one (not yet built, tracked here)
+## Open Requirement (RESOLVED — obsolete, not by building this, but by a later decision elsewhere): `saga-orchestrator`'s recovery reusing the original `Idempotency-Key`
+
+**Status update:** `saga-orchestrator` is now built (other-docs/10), and
+this requirement was NOT implemented as originally described below — it
+turned out to be unnecessary. Between this section being written and
+`saga-orchestrator` actually being built, `ledger-service` removed its
+client-supplied `Idempotency-Key` header entirely (migration V1,
+other-docs/08 Decision 29): `(userId, sagaId, phase)` is the whole write
+identity now, derived and fed to `IdempotencyGuard` internally by
+`ledger-service` itself. A redo is simply `saga-orchestrator` calling the
+same phase endpoint again for the same `sagaId` — there is no
+client-supplied key to persist or reuse at all, so the entire mechanism
+this section originally called for is moot for `ledger-service` calls.
+
+**One real analog survives, just relocated:** `fx-rate-service`'s
+`POST /v1/fx/executions` still uses a genuine client-supplied idempotency
+key — its `executionId`. `saga-orchestrator` does exactly what this
+section originally asked for, just for that one field: `SagaState`
+computes `executionId` deterministically once (the moment a saga reaches
+`LOCKED`) and reuses it verbatim on every redo of the EXECUTE step — see
+`SagaState`'s javadoc and other-docs/10's design-decisions doc. The
+original text below is kept for historical context (it correctly predicted
+the FAILURE MODE — a fresh key per redo bypassing both the cache and the
+constraint — even though the fix landed somewhere else).
+
+**Original text (superseded, kept for context):**
 
 Everything above proves retries are safe **when the retry presents the same
 `Idempotency-Key` it used the first time** — a live client resubmitting its
@@ -677,9 +702,10 @@ calls that phase, and reuse that **exact same** key on every subsequent
 redo of that phase. A redo is a retry of the same logical attempt, not a new
 one, and must be treated like one.
 
-**Status: documented, not yet implemented** — `saga-orchestrator` itself
-doesn't exist yet; tracked here so this requirement isn't lost by the time
-it's built. See also [DECISIONS.md](DECISIONS.md)'s Known Open Gaps table.
+**Status: superseded, see the note above this section** — `saga-orchestrator`
+is now built, and did not need this mechanism for `ledger-service` calls.
+See also [DECISIONS.md](DECISIONS.md)'s Known Open Gaps table (should be
+updated to drop this entry once reviewed).
 
 ### Related, already-resolved question: does reusing `hold`'s key for `lock` corrupt the DB?
 

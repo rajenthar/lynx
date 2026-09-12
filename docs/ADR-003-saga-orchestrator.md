@@ -731,8 +731,8 @@ orchestrator {
 
 - [ADR-001: Ledger-first Saga](ADR-001-ledger-first-saga.md) — Saga phases and pessimistic locking
 - [ADR-002: Transactional Outbox](ADR-002-transactional-outbox.md) — How events are published
-- [ADR-004: Idempotency via Idempotency-Key](ADR-004-idempotency.md) — Idempotency for retries. **Open requirement for this orchestrator specifically:** its recovery/redo loop MUST persist and reuse the same `Idempotency-Key` per (saga, phase) across redos — a fresh key per redo attempt bypasses both the cache and the DB's UNIQUE constraint, since neither is scoped on anything except the key itself. See ADR-004's "Open Requirement" section.
-- [ADR-007: Internal Service-to-Service Authentication](ADR-007-internal-service-authentication.md) — **open, unresolved:** how this orchestrator authenticates itself when it calls `ledger-service`'s phase endpoints, given the original end-user's JWT is long gone by the time later phases run
+- [ADR-004: Idempotency via Idempotency-Key](ADR-004-idempotency.md) — **Resolved by a later decision, not built as originally planned here:** `ledger-service` removed its client-supplied `Idempotency-Key` entirely (migration V1, other-docs/08 Decision 29) — `(userId, sagaId, phase)` is the whole write identity now, so this orchestrator's redo loop needs no key-persistence mechanism at all; a redo is simply re-calling the same phase endpoint for the same `sagaId`. See other-docs/10's plan for the full correction. `fx-rate-service`'s `executionId` still needs the equivalent discipline this ADR originally described — see `SagaState`'s javadoc.
+- [ADR-007: Internal Service-to-Service Authentication](ADR-007-internal-service-authentication.md) — **built, and `saga-orchestrator` is its first real caller** (other-docs/10): `ServiceTokenProvider`/`CircuitBreaker` authenticate every call to `ledger-service`/`fx-rate-service`, asserting `onBehalfOfUserId` per saga.
 
 ---
 
