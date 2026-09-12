@@ -1,0 +1,200 @@
+openapi: 3.0.3
+info:
+  title: Lynx saga-orchestrator API
+  description: >
+    Purely internal (other-docs/10 Decision 3) — every caller must present a
+    token carrying the internal-service role; there is no end-user path at
+    all. Drives HOLD -> QUOTE+LOCK -> EXECUTE -> SETTLE across
+    ledger-service and fx-rate-service (ADR-003), one saga per row in
+    saga_state. A future transaction-service is this API's only intended
+    caller, deriving sagaId from the real end-user's own Idempotency-Key
+    (ADR-004's original chain) before ever reaching here.
+  version: "0.1.0"
+  contact:
+    name: Lynx
+servers:
+  - url: http://localhost:8083
+    description: Local development
+
+tags:
+  - name: sagas
+    description: Internal saga lifecycle — creation and status lookup
+
+security:
+  - bearerAuth: []
+
+paths:
+  /internal/sagas:
+    post:
+      tags: [sagas]
+      summary: Create a saga — holds funds immediately, returns status HOLDING
+      description: >
+        Idempotent on sagaId: a duplicate call for a saga that already
+        exists returns the existing row rather than holding funds twice
+        (ledger-service's own hold is itself idempotent per (userId,
+        sagaId, HOLD), so this is a convenience against a redundant HTTP
+        call, not the only safety net). The polling loop then drives the
+        saga forward asynchronously — this call does not wait for LOCK,
+        EXECUTE, or SETTLE.
+      operationId: createSaga
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSagaRequest'
+            example:
+              sagaId: 8f14e45f-ceea-467e-adc0-8fb2a1a2b7f8
+              fromAccountId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              toAccountId: b2c3d4e5-1234-4562-b3fc-2c963f66afa6
+              amount: 100.00
+              fromCurrency: SGD
+              toCurrency: USD
+              retriedFromSagaId: null
+              onBehalfOfUserId: user-1
+      responses:
+        '200':
+          description: The saga now exists (or already did), status HOLDING or later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller's token does not carry the internal-service role, or omitted onBehalfOfUserId.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /internal/sagas/{sagaId}:
+    get:
+      tags: [sagas]
+      summary: Read a saga's current status
+      description: >
+        Scoped by (sagaId, onBehalfOfUserId), not sagaId alone
+        (other-docs/10 Decision 7) — sagaId is deterministically derived
+        upstream and can theoretically collide between two unrelated
+        users; a saga belonging to a different user reads back as the same
+        404 as one that never existed. onBehalfOfUserId is REQUIRED here
+        (unlike ledger-service's equivalent GET endpoints, where it's
+        optional) — this endpoint has no end-user path at all, so there is
+        no other source of userId to scope the lookup by.
+      operationId: getSaga
+      parameters:
+        - name: sagaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: onBehalfOfUserId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The saga's current state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller's token does not carry the internal-service role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No saga found for this id and onBehalfOfUserId — also the response for a saga that belongs to a different user entirely.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    CreateSagaRequest:
+      type: object
+      required: [sagaId, fromAccountId, toAccountId, amount, fromCurrency, toCurrency, onBehalfOfUserId]
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        fromAccountId:
+          type: string
+          format: uuid
+        toAccountId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: decimal
+        fromCurrency:
+          type: string
+          description: ISO-4217 currency code.
+        toCurrency:
+          type: string
+          description: ISO-4217 currency code.
+        retriedFromSagaId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Audit-only (other-docs/10 Decision 2) — not a uniqueness-bearing key.
+        onBehalfOfUserId:
+          type: string
+          description: ADR-007 Option C — required on every call, since this endpoint has no end-user path at all.
+
+    SagaResponse:
+      type: object
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [HOLDING, LOCKED, EXECUTED, SETTLED, FAILED]
+        failureReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        correlationId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: array
+          items:
+            type: string
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'

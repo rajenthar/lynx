@@ -8,6 +8,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -61,9 +64,16 @@ class ServiceTokenProviderTest {
   void setUp() {
     httpClient = mock(HttpClient.class);
     clock = new MutableClock();
+    CircuitBreakerConfig config = CircuitBreakerConfig.custom()
+        .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+        .slidingWindowSize(5)
+        .minimumNumberOfCalls(5)
+        .failureRateThreshold(100)
+        .waitDurationInOpenState(Duration.ofSeconds(30))
+        .build();
     provider = new ServiceTokenProvider(
         httpClient, URI.create("https://auth.lynx/token"), "ledger-service", "secret",
-        clock, new CircuitBreaker(5, Duration.ofSeconds(30), clock));
+        clock, CircuitBreaker.of("test", config));
   }
 
   @SuppressWarnings("unchecked")
@@ -134,7 +144,7 @@ class ServiceTokenProviderTest {
     }
     // Circuit now open (threshold=5) — the 6th attempt must fail fast WITHOUT
     // calling the token endpoint again.
-    assertThrows(CircuitBreaker.CircuitOpenException.class, () -> provider.currentToken());
+    assertThrows(CallNotPermittedException.class, () -> provider.currentToken());
     verify(httpClient, times(5)).send(any(HttpRequest.class), any());
   }
 }

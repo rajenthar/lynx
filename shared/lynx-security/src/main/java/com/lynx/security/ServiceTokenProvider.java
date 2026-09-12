@@ -2,6 +2,9 @@ package com.lynx.security;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -42,6 +45,13 @@ import org.slf4j.LoggerFactory;
  *   <li><b>Circuit breaker, scoped to this fetch only</b> — wraps ONLY the
  *       call to the token endpoint. It has no visibility into, and no
  *       effect on, whatever the caller does with the token afterward.
+ *       resilience4j — this class's own hand-rolled {@code CircuitBreaker}
+ *       was retired once a second real caller ({@code saga-orchestrator}'s
+ *       downstream-call breakers, other-docs/10 Decision 8) needed the
+ *       dependency anyway; no {@code ignoreExceptions(...)} needed here
+ *       unlike those — every {@link ServiceTokenException} this fetch can
+ *       throw genuinely IS a token-endpoint failure, there's no 4xx-vs-5xx
+ *       distinction to make for a token response.
  *   <li><b>In-process cache, not shared (e.g. Redis)</b> — deliberately.
  *       Refreshed roughly once per ~50 minutes PER INSTANCE, a trivial
  *       request rate; sharing would add real complexity for an
@@ -54,6 +64,23 @@ public final class ServiceTokenProvider {
 
   /** Refresh once within 10 minutes of real expiry — absorbs clock skew, never held to the wire. */
   private static final Duration TOKEN_TTL_BUFFER = Duration.ofMinutes(10);
+
+  /**
+   * 5 consecutive failures, 30s cooldown — a count-based sliding window
+   * sized exactly to the threshold, with a 100% failure-rate requirement,
+   * is what makes "N consecutive failures" and "N failures out of the
+   * last N calls, 100% rate" equivalent: a single success anywhere in the
+   * window brings the rate under 100% and the window slides forward, so
+   * it can't trip on non-consecutive failures either.
+   */
+  private static final CircuitBreakerConfig DEFAULT_CONFIG = CircuitBreakerConfig.custom()
+      .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+      .slidingWindowSize(5)
+      .minimumNumberOfCalls(5)
+      .failureRateThreshold(100)
+      .waitDurationInOpenState(Duration.ofSeconds(30))
+      .permittedNumberOfCallsInHalfOpenState(1)
+      .build();
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -69,7 +96,7 @@ public final class ServiceTokenProvider {
   public ServiceTokenProvider(HttpClient httpClient, URI tokenEndpoint,
                                String clientId, String clientSecret) {
     this(httpClient, tokenEndpoint, clientId, clientSecret,
-        Clock.systemUTC(), new CircuitBreaker(5, Duration.ofSeconds(30)));
+        Clock.systemUTC(), CircuitBreaker.of("service-token-provider", DEFAULT_CONFIG));
   }
 
   ServiceTokenProvider(HttpClient httpClient, URI tokenEndpoint, String clientId,
@@ -88,15 +115,15 @@ public final class ServiceTokenProvider {
    * only when the cached one is missing or within {@code TOKEN_TTL_BUFFER}
    * of expiring.
    *
-   * @throws CircuitBreaker.CircuitOpenException if the token endpoint has
-   *     failed {@code failureThreshold} times in a row and the cooldown
-   *     hasn't elapsed yet — the token endpoint is never called in this case
+   * @throws CallNotPermittedException if the token endpoint has failed
+   *     enough times in a row and the cooldown hasn't elapsed yet — the
+   *     token endpoint is never called in this case
    * @throws ServiceTokenException if the fetch itself failed (unreachable,
    *     non-200, malformed response)
    */
   public synchronized String currentToken() {
     if (cached == null || isNearExpiry(cached)) {
-      cached = circuitBreaker.call(this::fetchToken);
+      cached = circuitBreaker.executeSupplier(this::fetchToken);
     }
     return cached.value();
   }
