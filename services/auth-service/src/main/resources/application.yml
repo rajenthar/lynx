@@ -1,0 +1,38 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: auth-service
+  datasource:
+    # Same shared local Postgres as every other service (infra's
+    # lynx-postgres container, port 5433) — this service owns its own
+    # tables (users, service_clients) within it.
+    url: jdbc:postgresql://localhost:5433/lynx
+    username: lynx
+    password: lynx
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-},%X{correlationId:-}]"
