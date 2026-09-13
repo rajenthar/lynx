@@ -26,7 +26,7 @@ be re-derived from scratch.
 | `lynx-telemetry` | Built, tested | [other-docs/06](other-docs/06-lynx-telemetry-design-decisions.md) |
 | `ledger-service` | Built, tested (15 tests) — HOLD/LOCK/SETTLE/RELEASE + audit trail + locked-rate read, real Postgres via Testcontainers | [other-docs/08](other-docs/08-ledger-service-design-decisions.md) |
 | `fx-rate-service` | Built, tested (14 tests) — idempotent FX execution + rate quoting (with TTL), both behind mock providers; no real caller or real provider yet | [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) |
-| `auth-service` | Not started | — |
+| `auth-service` | Built, tested (17 tests) — real Postgres-backed register/login (BCrypt), OAuth2 Client Credentials service-token issuance (ADR-007), publishes the JWKS every `JwtVerifier` already expects; RSA key generated fresh in-memory per boot | [other-docs/11](other-docs/11-auth-service-design-decisions.md) |
 | `saga-orchestrator` | Built, tested (25 tests) — HOLD → QUOTE+LOCK → EXECUTE → SETTLE polling loop, `FOR UPDATE SKIP LOCKED` proven against real Postgres, `ServiceTokenProvider`'s first real caller; recovery worker; `saga_state` scoped by `(user_id, saga_id)` not `saga_id` alone; each downstream client has its own resilience4j `CircuitBreaker`, a separate named instance from `ServiceTokenProvider`'s own (now also resilience4j — `lynx-security`'s hand-rolled `CircuitBreaker` was deleted entirely); `transaction-service` (not built) is its only intended caller | [other-docs/10](other-docs/10-saga-orchestrator-plan.md) |
 | `account-service` | Not started | — |
 | everything else in `services/*` (12 more placeholder dirs) | Not started | — |
@@ -42,7 +42,7 @@ be re-derived from scratch.
 | [ADR-003](ADR-003-saga-orchestrator.md) | Central saga orchestrator (polling) | Event choreography | Explicit flow; single place for state, recovery, and compensation |
 | [ADR-004](ADR-004-idempotency.md) | Idempotency-Key + deterministic saga_id | Random saga_id, cache-only dedup | DB UNIQUE constraint is the safety net that survives crashes |
 | [ADR-005](ADR-005-cqrs-read-model.md) | account-service as pure CQRS projection | Querying ledger for balances | Reads scale independently; ledger write path stays untouched |
-| [ADR-007](ADR-007-internal-service-authentication.md) | Service identity + on-behalf-of userId (ACCEPTED — built and tested in `lynx-security`/`ledger-service`; `auth-service` issuing these tokens is the only piece still open) | Replaying the user's own JWT through every saga phase | A saga's own live JWT expires long before the saga finishes; service calls must authenticate as the service, not impersonate the user |
+| [ADR-007](ADR-007-internal-service-authentication.md) | Service identity + on-behalf-of userId (ACCEPTED and fully implemented — `lynx-security`, `ledger-service`, `saga-orchestrator`, and now `auth-service` issuing the tokens itself) | Replaying the user's own JWT through every saga phase | A saga's own live JWT expires long before the saga finishes; service calls must authenticate as the service, not impersonate the user |
 
 ---
 
@@ -286,7 +286,7 @@ writeup.
 |---|---|---|
 | No API-level rate limiting (per-user/per-IP throttling) anywhere in the system | `api-gateway` (not yet built) | [ADR-004](ADR-004-idempotency.md)'s Security Considerations |
 | `hold` performs no balance validation — no service checks sufficient funds before writing | `account-service` (not yet built) | [other-docs/08](other-docs/08-ledger-service-design-decisions.md) Decision 23 |
-| `auth-service` issuing service-identity tokens; dual-auth-shape acceptance beyond `ledger-service` | `auth-service` (not yet built) | [ADR-007](ADR-007-internal-service-authentication.md)'s open items |
+| ~~`auth-service` issuing service-identity tokens~~ **RESOLVED** — `auth-service` built and tested (other-docs/11); dual-auth-shape acceptance beyond `ledger-service` still applies only to services that exist so far | `auth-service` (built) | [ADR-007](ADR-007-internal-service-authentication.md) |
 | ~~Recovery/redo must reuse the SAME `Idempotency-Key` per (saga, phase)~~ **RESOLVED — became moot**, not by building this: `ledger-service` removed its client-supplied `Idempotency-Key` entirely before `saga-orchestrator` existed, so a redo is just calling the same phase again for the same `sagaId`. The equivalent discipline DOES exist for `fx-rate-service`'s `executionId` — see `SagaState`'s javadoc | `saga-orchestrator` (built) | [ADR-004](ADR-004-idempotency.md)'s Open Requirement section (updated), [other-docs/10](other-docs/10-saga-orchestrator-plan.md) |
 | No real FX liquidity-provider integration — `MockFxProvider` is the only implementation | `fx-rate-service` | [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) |
 | No auth wiring on `fx-rate-service` yet (deliberate — no real caller to authenticate) | `fx-rate-service` | [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) Decision 4 |

@@ -1,14 +1,18 @@
 # ADR-007: Internal Service-to-Service Authentication for Saga Phases
 
-**Status:** Accepted — Option C (service identity + on-behalf-of `userId`)
-is the settled direction. Its client-side mechanics
-(`ServiceTokenProvider`/`CircuitBreaker` in `lynx-security`) AND
-`ledger-service`'s own server-side acceptance of both auth shapes
-(`internal-service`-role token + `onBehalfOfUserId` field, enforced in
-`LedgerController#userId`) are designed, implemented, and tested — see
-"Implementation Details" below. What's left is `auth-service` actually
-issuing these tokens (it doesn't exist yet) and `saga-orchestrator` being
-the real caller — tracked explicitly, not blocking this ADR's acceptance.
+**Status:** Accepted and fully implemented. Option C (service identity +
+on-behalf-of `userId`) is the settled direction. Its client-side mechanics
+(`ServiceTokenProvider` in `lynx-security`, guarded by a resilience4j
+`CircuitBreaker`) AND `ledger-service`'s own server-side acceptance of both
+auth shapes (`internal-service`-role token + `onBehalfOfUserId` field,
+enforced in `LedgerController#userId`) are designed, implemented, and
+tested — see "Implementation Details" below. `saga-orchestrator` is the
+real caller (other-docs/10). `auth-service` (other-docs/11) is now built
+and tested too — it issues both an end-user JWT (real Postgres-backed
+register/login) and the OAuth2 Client Credentials service-identity token
+`ServiceTokenProvider` expects, and publishes the JWKS every
+`JwtVerifier` in the system already hard-codes the URL for. Every
+previously-open bullet in this ADR is resolved.
 
 **Date:** 2026-08-15
 
@@ -94,19 +98,20 @@ authenticate with a service identity, and the real end-user's identity
 travels as an explicit, service-asserted field, trusted because the
 calling service itself was verified.
 
-**This ADR is intentionally incomplete.** It exists to record the
-decision that was made (which of the three options) and rule out the
+**This ADR was originally intentionally incomplete** — it recorded the
+decision that was made (which of the three options) and ruled out the
 other two with their reasoning, WITHOUT yet designing the concrete
-mechanics — those depend on decisions not yet made in `auth-service`
-(which doesn't exist yet) and `saga-orchestrator` (same). Concretely
-still open — one bullet below is now resolved for `ledger-service`
-specifically (see "Implementation Details"), the rest remain open:
+mechanics, which depended on decisions not yet made in `auth-service`
+(which didn't exist yet) and `saga-orchestrator` (same). All of that is
+now resolved:
 
-- How does `auth-service` issue a distinct "service identity" token to
-  `saga-orchestrator` (and any other future internal caller)? A separate
-  issuer/audience? A role/claim on the same token shape? A completely
-  different token type (mTLS client cert instead of a JWT)? **Still open**
-  — `auth-service` doesn't exist yet.
+- ~~How does `auth-service` issue a distinct "service identity" token to
+  `saga-orchestrator` (and any other future internal caller)?~~
+  **Resolved** — same token shape (RS256 JWT), same `iss`/`aud` every
+  `JwtVerifier` already expects, distinguished by a `roles: ["internal-service"]`
+  claim, issued via the OAuth2 Client Credentials grant (RFC 6749 §4.4) at
+  `POST /auth/token`. No mTLS, no separate issuer/audience — see
+  other-docs/11.
 - ~~What does `ledger-service`'s `JwtAuthFilter` need to look like to
   accept BOTH shapes?~~ **Resolved** — a role claim (`internal-service`)
   on the SAME `JwtVerifier`/`UserContext` shape already in use; no new
@@ -260,19 +265,23 @@ internal service first. Three behaviors, all covered by
 | ordinary end-user token | present | 403 — only a proven service caller may assert this |
 | ordinary end-user token | absent | unchanged — `sub` claim used, exactly as before |
 
-This resolves 2 of the 4 previously-open questions above for
+This resolved 2 of the 4 previously-open questions above for
 `ledger-service` specifically; `auth-service` issuing the
-`internal-service`-role token in the first place is still open (tests
-mint one directly, same precedent as `JwtVerifierTest`'s in-memory JWKS).
+`internal-service`-role token in the first place is now ALSO resolved
+(other-docs/11) — `ledger-service`'s own tests still mint one directly
+(same precedent as `JwtVerifierTest`'s in-memory JWKS), which remains the
+right call for a unit/integration test regardless of `auth-service`
+existing.
 
-### Explicitly out of scope for this section (still open, see above)
+### Now resolved: `auth-service` issuance (other-docs/11)
 
-How `auth-service` actually issues these tokens, how `ledger-service`
-accepts both an end-user JWT shape and a service-token shape, and how the
-"only `saga-orchestrator` may assert an on-behalf-of `userId`" trust
-boundary gets enforced are all still undecided — this section only
-resolves the CLIENT-SIDE mechanics of holding and reusing a token once
-one exists, not the server-side issuance/acceptance design.
+`POST /auth/token` (Client Credentials grant) issues the
+`internal-service`-role token; `POST /auth/register`/`POST /auth/login`
+issue an ordinary end-user token from the same signer, same `iss`/`aud`.
+`GET /auth/.well-known/jwks.json` publishes the public key every
+`JwtVerifier.fromJwksUrl` across the system already points at. This
+section's earlier scope note (client-side mechanics only, not
+server-side issuance) no longer applies — both sides now exist.
 
 ---
 

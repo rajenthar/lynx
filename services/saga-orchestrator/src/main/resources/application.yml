@@ -39,16 +39,19 @@ logging:
 
 lynx:
   security:
-    # Placeholder: auth-service does not exist yet — same as every other
-    # service's application.yml. Tests wire an in-memory JWKS directly.
+    # auth-service now exists (other-docs/11) and answers exactly this URL
+    # when run locally on port 8080. Tests still wire an in-memory JWKS
+    # directly rather than hitting it over HTTP.
     jwks-url: http://localhost:8080/auth/.well-known/jwks.json
     issuer: https://auth.lynx
     audience: lynx-api
   # ADR-007: this service's OWN identity when calling ledger-service/
-  # fx-rate-service. auth-service's token endpoint doesn't exist yet either
-  # — same placeholder status as jwks-url above. Tests mock
-  # ServiceTokenProvider's HttpClient directly (see ServiceTokenProviderTest's
-  # own pattern), never hit this URL for real.
+  # fx-rate-service. This exact client-id/client-secret pair is seeded into
+  # auth-service's service_clients table at ITS startup (ServiceClientSeeder,
+  # other-docs/11 Decision 1) — running both services locally, this actually
+  # works end to end now. Tests still mock ServiceTokenProvider's HttpClient
+  # directly (see ServiceTokenProviderTest's own pattern), never hit this
+  # URL for real.
   service-token:
     token-endpoint: http://localhost:8080/auth/token
     client-id: saga-orchestrator
