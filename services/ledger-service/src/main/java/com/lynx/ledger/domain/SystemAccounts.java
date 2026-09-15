@@ -16,6 +16,17 @@ public final class SystemAccounts {
   public static final UUID FX_LOCK =
       UUID.fromString("00000000-0000-0000-0000-000000000002");
 
+  /**
+   * Counterparty for DEPOSIT_DR (other-docs/12) — money entering the system
+   * from outside it. Unlike {@link #HOLD_POOL}/{@link #FX_LOCK}, this
+   * account's balance is expected to run permanently negative (every
+   * deposit debits it) — that's correct, not an invariant violation: it
+   * represents value the system doesn't itself hold, only tracks the
+   * origin of.
+   */
+  public static final UUID FUNDING_SOURCE =
+      UUID.fromString("00000000-0000-0000-0000-000000000003");
+
   private SystemAccounts() {
   }
 }

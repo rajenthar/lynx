@@ -57,12 +57,31 @@ class DomainEventTest {
 
   @Test
   void transferFailedCarriesItsOwnType() {
-    TransferFailed event = new TransferFailed("insufficient funds");
+    TransferFailed event = new TransferFailed(UUID.randomUUID(), POSITIVE, "insufficient funds");
     assertEquals(EventType.TRANSFER_FAILED, event.eventType());
   }
 
   @Test
   void transferFailedRejectsBlankReason() {
-    assertThrows(IllegalArgumentException.class, () -> new TransferFailed(" "));
+    assertThrows(IllegalArgumentException.class,
+        () -> new TransferFailed(UUID.randomUUID(), POSITIVE, " "));
+  }
+
+  @Test
+  void transferFailedRejectsNonPositiveAmount() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new TransferFailed(UUID.randomUUID(), ZERO, "insufficient funds"));
+  }
+
+  @Test
+  void fundsDepositedCarriesItsOwnType() {
+    FundsDeposited event = new FundsDeposited(UUID.randomUUID(), POSITIVE);
+    assertEquals(EventType.FUNDS_DEPOSITED, event.eventType());
+  }
+
+  @Test
+  void fundsDepositedRejectsNonPositiveAmount() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new FundsDeposited(UUID.randomUUID(), ZERO));
   }
 }

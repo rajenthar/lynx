@@ -23,6 +23,14 @@
     transactional outbox to consumers.
   </description>
 
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
   <dependencies>
     <!-- Money.toMinorUnits(): events carry money as lossless integer minor units -->
     <dependency>

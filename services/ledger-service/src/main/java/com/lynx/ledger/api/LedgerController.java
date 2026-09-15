@@ -1,6 +1,5 @@
 package com.lynx.ledger.api;
 
-import com.lynx.common.error.AuthException;
 import com.lynx.ledger.config.JwtAuthFilter;
 import com.lynx.ledger.dto.LedgerLegView;
 import com.lynx.ledger.dto.LedgerPhaseResponse;
@@ -43,21 +42,14 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code onBehalfOfUserId} value instead (request body for the four
  * {@code POST}s, a query param for the two {@code GET}s, since a
  * {@code GET} has no body), trusted only because the CALLER itself was
- * already verified. See {@link #userId} for the exact trust
- * boundary.
+ * already verified. See {@link TrustedCaller#userId} for the exact trust
+ * boundary — shared with {@link LedgerDepositController}.
  */
 @RestController
 @RequestMapping("/v1/ledger/sagas/{sagaId}")
 public class LedgerController {
 
   private static final Logger log = LoggerFactory.getLogger(LedgerController.class);
-
-  /**
-   * ADR-007 Option C's service-identity role claim. A token carrying this
-   * role is trusted to assert an {@code onBehalfOfUserId} in the request
-   * body instead of being the real end-user itself — see {@link #userId}.
-   */
-  private static final String INTERNAL_SERVICE_ROLE = "internal-service";
 
   private final LedgerService ledgerService;
 
@@ -70,7 +62,7 @@ public class LedgerController {
                                    @RequestBody HoldRequest request,
                                    HttpServletRequest httpRequest) {
     try (MdcScope ignored = MdcScope.forSaga(sagaId.toString())) {
-      String userId = userId(httpRequest, request.onBehalfOfUserId());
+      String userId = TrustedCaller.userId(httpRequest, request.onBehalfOfUserId());
       log.info("HOLD requested for saga {} by userId={}", sagaId, userId);
       Money amount = Money.of(request.amount(), Money.currencyOf(request.currencyCode()));
       return ledgerService.hold(sagaId, userId, request.fromAccountId(), amount);
@@ -82,7 +74,7 @@ public class LedgerController {
                                    @RequestBody LockRequest request,
                                    HttpServletRequest httpRequest) {
     try (MdcScope ignored = MdcScope.forSaga(sagaId.toString())) {
-      String userId = userId(httpRequest, request.onBehalfOfUserId());
+      String userId = TrustedCaller.userId(httpRequest, request.onBehalfOfUserId());
       log.info("LOCK requested for saga {} by userId={}, {}->{} @ {}",
           sagaId, userId, request.fromCurrency(), request.toCurrency(), request.rate());
       Money lockedAmount = Money.of(request.lockedAmount(), Money.currencyOf(request.currencyCode()));
@@ -96,7 +88,7 @@ public class LedgerController {
                                      @RequestBody SettleRequest request,
                                      HttpServletRequest httpRequest) {
     try (MdcScope ignored = MdcScope.forSaga(sagaId.toString())) {
-      String userId = userId(httpRequest, request.onBehalfOfUserId());
+      String userId = TrustedCaller.userId(httpRequest, request.onBehalfOfUserId());
       log.info("SETTLE requested for saga {} by userId={}", sagaId, userId);
       Money debited = Money.of(request.debitedAmount(), Money.currencyOf(request.debitedCurrency()));
       Money credited = Money.of(request.creditedAmount(), Money.currencyOf(request.creditedCurrency()));
@@ -110,7 +102,7 @@ public class LedgerController {
                                       @RequestBody ReleaseRequest request,
                                       HttpServletRequest httpRequest) {
     try (MdcScope ignored = MdcScope.forSaga(sagaId.toString())) {
-      String userId = userId(httpRequest, request.onBehalfOfUserId());
+      String userId = TrustedCaller.userId(httpRequest, request.onBehalfOfUserId());
       log.info("RELEASE requested for saga {} by userId={}, reason={}",
           sagaId, userId, request.reason());
       Money amount = Money.of(request.amount(), Money.currencyOf(request.currencyCode()));
@@ -123,7 +115,7 @@ public class LedgerController {
                                          @RequestParam(required = false) String onBehalfOfUserId,
                                          HttpServletRequest httpRequest) {
     try (MdcScope ignored = MdcScope.forSaga(sagaId.toString())) {
-      String userId = userId(httpRequest, onBehalfOfUserId);
+      String userId = TrustedCaller.userId(httpRequest, onBehalfOfUserId);
       log.debug("Audit trail requested for saga {} by userId={}", sagaId, userId);
       List<LedgerLegView> legs = ledgerService.auditTrail(sagaId, userId);
       log.debug("Audit trail for saga {} returned {} leg(s)", sagaId, legs.size());
@@ -141,41 +133,10 @@ public class LedgerController {
                                     @RequestParam(required = false) String onBehalfOfUserId,
                                     HttpServletRequest httpRequest) {
     try (MdcScope ignored = MdcScope.forSaga(sagaId.toString())) {
-      String userId = userId(httpRequest, onBehalfOfUserId);
+      String userId = TrustedCaller.userId(httpRequest, onBehalfOfUserId);
       log.debug("Locked-rate lookup requested for saga {} by userId={}", sagaId, userId);
       return ledgerService.lockedRate(sagaId, userId);
     }
   }
 
-  /**
-   * ADR-007 Option C, enforced at the one place it actually matters: a
-   * normal end-user token yields its own verified {@code sub} as before. A
-   * token carrying the {@code internal-service} role (e.g.
-   * {@code saga-orchestrator} presenting its own service-identity token,
-   * see ADR-007's {@code ServiceTokenProvider}) is trusted to assert who it
-   * is acting on behalf of via the request body instead — and MUST supply
-   * one. A non-service token attempting to assert {@code onBehalfOfUserId}
-   * is rejected outright: only a caller already proven to be an
-   * authenticated internal service gets to say "on behalf of."
-   */
-  private static String userId(HttpServletRequest request, String onBehalfOfUserId) {
-    UserContext userContext =
-        (UserContext) request.getAttribute(JwtAuthFilter.USER_CONTEXT_ATTRIBUTE);
-    boolean isServiceCaller = userContext.hasRole(INTERNAL_SERVICE_ROLE);
-    if (isServiceCaller) {
-      if (onBehalfOfUserId == null || onBehalfOfUserId.isBlank()) {
-        log.warn("Internal-service caller {} omitted onBehalfOfUserId", userContext.userId());
-        throw AuthException.unauthorized(
-            "Internal-service callers must supply onBehalfOfUserId");
-      }
-      return onBehalfOfUserId;
-    }
-    if (onBehalfOfUserId != null) {
-      log.warn("Non-service caller {} attempted to assert onBehalfOfUserId={}",
-          userContext.userId(), onBehalfOfUserId);
-      throw AuthException.forbidden(
-          "Only an internal-service caller may assert onBehalfOfUserId");
-    }
-    return userContext.userId();
-  }
 }

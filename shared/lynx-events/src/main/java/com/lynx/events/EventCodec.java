@@ -45,6 +45,7 @@ public final class EventCodec {
         case RATE_LOCKED -> MAPPER.treeToValue(payloadNode, RateLocked.class);
         case TRANSFER_SETTLED -> MAPPER.treeToValue(payloadNode, TransferSettled.class);
         case TRANSFER_FAILED -> MAPPER.treeToValue(payloadNode, TransferFailed.class);
+        case FUNDS_DEPOSITED -> MAPPER.treeToValue(payloadNode, FundsDeposited.class);
       };
 
       return new EventEnvelope<>(

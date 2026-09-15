@@ -18,6 +18,14 @@
   <name>saga-orchestrator</name>
   <description>Drives HOLD to LOCK to EXECUTE to SETTLE across ledger-service and fx-rate-service (ADR-003); polling loop with FOR UPDATE SKIP LOCKED, ADR-007 service-to-service auth as the caller</description>
 
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>com.lynx</groupId>

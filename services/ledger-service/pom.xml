@@ -18,6 +18,14 @@
   <name>ledger-service</name>
   <description>Append-only double-entry ledger + transactional outbox; executes HOLD/LOCK/SETTLE/RELEASE saga phases (ADR-001/002/004)</description>
 
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>com.lynx</groupId>

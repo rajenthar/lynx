@@ -67,13 +67,31 @@ class EventCodecTest {
 
   @Test
   void roundTripsTransferFailed() {
+    UUID account = UUID.randomUUID();
     EventEnvelope<TransferFailed> original = EventEnvelope.of(
-        4L, SAGA_ID, "corr-1", new TransferFailed("insufficient funds"));
+        4L, SAGA_ID, "corr-1",
+        new TransferFailed(account, new MoneyAmount(10000, "SGD"), "insufficient funds"));
 
     EventEnvelope<? extends DomainEvent> decoded = EventCodec.decode(EventCodec.encode(original));
 
     TransferFailed payload = assertInstanceOf(TransferFailed.class, decoded.payload());
+    assertEquals(account, payload.accountId());
+    assertEquals(new MoneyAmount(10000, "SGD"), payload.amount());
     assertEquals("insufficient funds", payload.reason());
+  }
+
+  @Test
+  void roundTripsFundsDeposited() {
+    UUID account = UUID.randomUUID();
+    EventEnvelope<FundsDeposited> original = EventEnvelope.of(
+        5L, SAGA_ID, "corr-1", new FundsDeposited(account, new MoneyAmount(50000, "SGD")));
+
+    EventEnvelope<? extends DomainEvent> decoded = EventCodec.decode(EventCodec.encode(original));
+
+    assertEquals(EventType.FUNDS_DEPOSITED, decoded.eventType());
+    FundsDeposited payload = assertInstanceOf(FundsDeposited.class, decoded.payload());
+    assertEquals(account, payload.accountId());
+    assertEquals(new MoneyAmount(50000, "SGD"), payload.amount());
   }
 
   @Test

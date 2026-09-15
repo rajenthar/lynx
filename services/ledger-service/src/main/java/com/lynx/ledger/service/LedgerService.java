@@ -1,10 +1,13 @@
 package com.lynx.ledger.service;
 
+import com.lynx.common.error.BusinessRuleException;
 import com.lynx.common.error.ConflictException;
+import com.lynx.common.error.ErrorCode;
 import com.lynx.common.error.NotFoundException;
 import com.lynx.events.DomainEvent;
 import com.lynx.events.EventCodec;
 import com.lynx.events.EventEnvelope;
+import com.lynx.events.FundsDeposited;
 import com.lynx.events.MoneyAmount;
 import com.lynx.events.RateLocked;
 import com.lynx.events.TransferFailed;
@@ -19,9 +22,11 @@ import com.lynx.ledger.domain.LedgerEntry;
 import com.lynx.ledger.domain.OutboxEntry;
 import com.lynx.ledger.domain.SagaPhase;
 import com.lynx.ledger.domain.SystemAccounts;
+import com.lynx.ledger.dto.LedgerHistoryEntryView;
 import com.lynx.ledger.dto.LedgerLegView;
 import com.lynx.ledger.dto.LedgerPhaseResponse;
 import com.lynx.ledger.dto.LockedRateView;
+import com.lynx.ledger.repository.AccountBalanceRepository;
 import com.lynx.ledger.repository.FxRateLockRepository;
 import com.lynx.ledger.repository.LedgerEntryRepository;
 import com.lynx.ledger.repository.OutboxEntryRepository;
@@ -29,11 +34,15 @@ import com.lynx.money.Money;
 import com.lynx.security.CorrelationId;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -66,27 +75,59 @@ public class LedgerService {
   private final LedgerEntryRepository ledgerEntryRepository;
   private final OutboxEntryRepository outboxEntryRepository;
   private final FxRateLockRepository fxRateLockRepository;
+  private final AccountBalanceRepository accountBalanceRepository;
   private final IdempotencyGuard idempotencyGuard;
   private final TransactionTemplate transactionTemplate;
 
   public LedgerService(LedgerEntryRepository ledgerEntryRepository,
                         OutboxEntryRepository outboxEntryRepository,
                         FxRateLockRepository fxRateLockRepository,
+                        AccountBalanceRepository accountBalanceRepository,
                         IdempotencyGuard idempotencyGuard,
                         TransactionTemplate transactionTemplate) {
     this.ledgerEntryRepository = ledgerEntryRepository;
     this.outboxEntryRepository = outboxEntryRepository;
     this.fxRateLockRepository = fxRateLockRepository;
+    this.accountBalanceRepository = accountBalanceRepository;
     this.idempotencyGuard = idempotencyGuard;
     this.transactionTemplate = transactionTemplate;
   }
 
+  /**
+   * The account must actually be able to cover {@code amount} before the
+   * {@code HOLD_DR} leg is allowed to post (other-docs/08 Decision 23) —
+   * enforced by {@link #insertLegsAndOutbox}'s per-leg balance application,
+   * NOT a separate read-then-decide step here. See other-docs/12 Decision
+   * 4 and {@link AccountBalanceRepository#debitIfSufficient} for why: the
+   * industry-standard pattern (TigerBeetle's running balance fields;
+   * Modern Treasury's "post only if the resulting balance satisfies a
+   * range") is one atomic conditional {@code UPDATE}, not a plain
+   * transaction wrapping a {@code SUM(...)} check — the latter is STILL
+   * racy under concurrent holds on the same account even inside one
+   * transaction, at the database's default isolation level.
+   */
   public LedgerPhaseResponse hold(UUID sagaId, String userId, UUID fromAccountId, Money amount) {
     List<LedgerEntry> legs = List.of(
         leg(sagaId, userId, EntryType.HOLD_DR, fromAccountId, amount),
         leg(sagaId, userId, EntryType.HOLD_CR, SystemAccounts.HOLD_POOL, amount));
     TransferHeld event = new TransferHeld(fromAccountId, MoneyAmount.of(amount));
     return writePhase(sagaId, userId, SagaPhase.HOLD, legs, event);
+  }
+
+  /**
+   * Not saga-driven (other-docs/12) — a direct, atomic double-entry credit
+   * from {@link SystemAccounts#FUNDING_SOURCE}. {@code depositId} plays
+   * exactly the role {@code sagaId} plays for the four saga phases: a
+   * caller-supplied UUID that IS the write identity, so a retried deposit
+   * request is a no-op the same way a retried saga phase is. No balance
+   * check needed — crediting an account can never overdraw it.
+   */
+  public LedgerPhaseResponse deposit(UUID depositId, String userId, UUID accountId, Money amount) {
+    List<LedgerEntry> legs = List.of(
+        leg(depositId, userId, EntryType.DEPOSIT_DR, SystemAccounts.FUNDING_SOURCE, amount),
+        leg(depositId, userId, EntryType.DEPOSIT_CR, accountId, amount));
+    FundsDeposited event = new FundsDeposited(accountId, MoneyAmount.of(amount));
+    return writePhase(depositId, userId, SagaPhase.DEPOSIT, legs, event);
   }
 
   public LedgerPhaseResponse lock(UUID sagaId, String userId, Money lockedAmount,
@@ -152,7 +193,7 @@ public class LedgerService {
     List<LedgerEntry> legs = List.of(
         leg(sagaId, userId, EntryType.RELEASE_DR, sourcePool, amount),
         leg(sagaId, userId, EntryType.RELEASE_CR, accountId, amount));
-    TransferFailed event = new TransferFailed(reason);
+    TransferFailed event = new TransferFailed(accountId, MoneyAmount.of(amount), reason);
     return writePhase(sagaId, userId, SagaPhase.RELEASE, legs, event);
   }
 
@@ -210,6 +251,26 @@ public class LedgerService {
         .toList();
   }
 
+  /**
+   * Everything that has ever happened to one account (other-docs/12) —
+   * deposits, holds, settles, releases, spanning every saga/deposit that
+   * ever touched it, newest first. Unlike {@link #auditTrail}, NOT scoped
+   * by {@code userId}: a ledger row's own {@code userId} is who initiated
+   * THAT operation (e.g. the sender for a {@code SETTLE_CR} row crediting
+   * the RECIPIENT's account), not who owns the account being queried —
+   * {@code ledger-service} has no notion of account ownership at all
+   * (that's {@code account-service}'s data, other-docs/12). Callers that
+   * need "is this actually the caller's own account" enforced must check
+   * that themselves before calling this — this endpoint trusts its caller
+   * the same way every {@code ledger-service} write already does.
+   */
+  public List<LedgerHistoryEntryView> accountHistory(UUID accountId, int limit) {
+    Pageable page = PageRequest.of(0, limit);
+    return ledgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId, page).stream()
+        .map(LedgerService::toHistoryView)
+        .toList();
+  }
+
   private LedgerPhaseResponse writePhase(UUID sagaId, String userId, SagaPhase phase,
                                           List<LedgerEntry> legs, DomainEvent event) {
     return writePhase(sagaId, userId, phase, legs, event, () -> { });
@@ -242,6 +303,7 @@ public class LedgerService {
     try {
       return transactionTemplate.execute(status -> {
         List<LedgerEntry> saved = ledgerEntryRepository.saveAll(legs);
+        applyBalanceDeltas(legs);
         withinTransaction.run();
 
         // The outbox row's own generated id IS the envelope's eventId (see
@@ -276,6 +338,73 @@ public class LedgerService {
           + "recovering the original", sagaId, e);
       throw new DuplicateRequestException(
           "Ledger entry already exists for saga " + sagaId, e);
+    } catch (CannotAcquireLockException e) {
+      // A genuine deadlock between two concurrent writes that each locked
+      // TWO different account_balances rows in opposite orders (e.g. two
+      // different transfers both touching the same pair of accounts) —
+      // Postgres detects and kills one participant. Rare, but possible
+      // with row-level locking (other-docs/12 Decision 4) whenever a
+      // single write touches more than one account row. NOTHING was
+      // persisted — safe to retry, same reasoning as the UNIQUE-constraint
+      // case above being a genuine duplicate rather than a real failure.
+      // Surfaced as DOWNSTREAM_UNAVAILABLE (503) deliberately:
+      // saga-orchestrator's AbstractServiceClient already treats a 5xx as
+      // transient and retries the same phase via its own polling loop
+      // (ADR-003) — reusing that existing retry path instead of retrying
+      // internally here.
+      log.warn("Deadlock writing saga {} — nothing persisted, safe to retry", sagaId, e);
+      throw new BusinessRuleException(ErrorCode.DOWNSTREAM_UNAVAILABLE,
+          "Concurrent write conflict for saga " + sagaId + " — retry the same request");
+    }
+  }
+
+  /**
+   * Applies every leg's balance delta to {@code account_balances}
+   * (other-docs/12 Decision 4) — the materialized running balance this
+   * whole mechanism replaced a {@code SUM(...)}-over-history check with.
+   * Every {@code *_CR} leg credits (positive delta), every {@code *_DR}
+   * leg debits (negative delta) — same convention {@link #assertBalanced}
+   * already relies on. Only {@link EntryType#HOLD_DR} — a REAL account
+   * being debited, where insufficient funds must actually reject the
+   * write — goes through the GUARDED conditional update; every other leg
+   * (including every credit, and every debit from a system account, which
+   * is allowed to run negative) is unconditional.
+   *
+   * <p><b>Lock ordering (other-docs/12 Decision 9):</b> sorted by {@code
+   * accountId} before applying, NOT in each phase's own construction order
+   * (e.g. {@code hold()} builds {@code [realAccount, HOLD_POOL]}, {@code
+   * release()} builds {@code [sourcePool, realAccount]} — reversed). Two
+   * legs sharing the same pair of {@code account_balances} rows (a
+   * {@code HOLD} on some account racing a {@code RELEASE} back into that
+   * same account, both pivoting through the shared {@code HOLD_POOL} row)
+   * would otherwise be able to acquire those two row-locks in opposite
+   * order — the textbook precondition for a deadlock. Forcing a single,
+   * global, deterministic order (lowest {@code accountId} first) across
+   * every phase closes it: this is the standard "lock ordering" /
+   * "resource ordering" deadlock-prevention technique — see e.g.
+   * <a href="https://wiki.sei.cmu.edu/confluence/display/java/LCK07-J.+Avoid+deadlock+by+requesting+and+releasing+locks+in+the+same+order">CERT
+   * LCK07-J</a>. Safe to reorder: every delta below is an independent,
+   * commutative addition to its own row — changing which row gets locked
+   * first changes nothing about the final balances, only the lock
+   * acquisition order.
+   */
+  private void applyBalanceDeltas(List<LedgerEntry> legs) {
+    List<LedgerEntry> lockOrdered = legs.stream()
+        .sorted(Comparator.comparing(LedgerEntry::getAccountId))
+        .toList();
+    for (LedgerEntry leg : lockOrdered) {
+      if (leg.getEntryType() == EntryType.HOLD_DR) {
+        int updated = accountBalanceRepository.debitIfSufficient(
+            leg.getAccountId(), leg.getCurrency(), leg.getAmount());
+        if (updated == 0) {
+          throw BusinessRuleException.insufficientFunds(
+              leg.getAccountId().toString(), leg.getCurrency());
+        }
+      } else {
+        BigDecimal delta = leg.getEntryType().name().endsWith("_CR")
+            ? leg.getAmount() : leg.getAmount().negate();
+        accountBalanceRepository.adjustUnconditionally(leg.getAccountId(), leg.getCurrency(), delta);
+      }
     }
   }
 
@@ -368,5 +497,10 @@ public class LedgerService {
   private static LedgerLegView toView(LedgerEntry entry) {
     return new LedgerLegView(
         entry.getEntryType(), entry.getAccountId(), entry.getAmount(), entry.getCurrency());
+  }
+
+  private static LedgerHistoryEntryView toHistoryView(LedgerEntry entry) {
+    return new LedgerHistoryEntryView(entry.getSagaId(), entry.getEntryType(), entry.getAccountId(),
+        entry.getAmount(), entry.getCurrency(), entry.getCreatedAt());
   }
 }

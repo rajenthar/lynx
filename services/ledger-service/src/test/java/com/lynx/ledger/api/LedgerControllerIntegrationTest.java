@@ -139,10 +139,31 @@ class LedgerControllerIntegrationTest {
     return headers;
   }
 
+  /**
+   * other-docs/12: {@code hold()} now checks the account's existing balance
+   * first (other-docs/08 Decision 23) — every test that expects a HOLD to
+   * actually succeed must fund the account first, exactly the way a real
+   * caller would (via the new deposit endpoint), not just assume an
+   * arbitrary fresh {@code UUID} account can be debited.
+   */
+  private void fundAccount(UUID accountId, String userId, BigDecimal amount, String currency) throws Exception {
+    Map<String, Object> body = Map.of(
+        "accountId", accountId, "amount", amount, "currencyCode", currency);
+    ResponseEntity<Map> response = restTemplate.exchange(
+        "/v1/ledger/deposits/" + UUID.randomUUID(),
+        org.springframework.http.HttpMethod.POST,
+        new HttpEntity<>(body, headersFor(userId)),
+        Map.class);
+    if (response.getStatusCode() != HttpStatus.OK) {
+      throw new IllegalStateException("Failed to fund test account: " + response);
+    }
+  }
+
   @Test
   void holdCreatesTwoLedgerRowsAndAuditTrailReflectsThem() throws Exception {
     UUID sagaId = UUID.randomUUID();
     UUID fromAccount = UUID.randomUUID();
+    fundAccount(fromAccount, "user-1", new BigDecimal("100.00"), "SGD");
 
     Map<String, Object> body = Map.of(
         "fromAccountId", fromAccount,
@@ -171,6 +192,7 @@ class LedgerControllerIntegrationTest {
   void retryOfTheSameSagaAndPhaseReturnsSameResultAndNoNewRows() throws Exception {
     UUID sagaId = UUID.randomUUID();
     UUID fromAccount = UUID.randomUUID();
+    fundAccount(fromAccount, "user-2", new BigDecimal("50.00"), "SGD");
     HttpHeaders headers = headersFor("user-2");
 
     Map<String, Object> body = Map.of(
@@ -208,6 +230,7 @@ class LedgerControllerIntegrationTest {
     // to say who it's acting on behalf of via the request body.
     UUID sagaId = UUID.randomUUID();
     UUID fromAccount = UUID.randomUUID();
+    fundAccount(fromAccount, "real-customer-1", new BigDecimal("100.00"), "SGD");
 
     Map<String, Object> body = new java.util.HashMap<>(Map.of(
         "fromAccountId", fromAccount,
@@ -287,6 +310,7 @@ class LedgerControllerIntegrationTest {
     // not user-1's real ones, even though the saga genuinely exists.
     UUID sagaId = UUID.randomUUID();
     UUID fromAccount = UUID.randomUUID();
+    fundAccount(fromAccount, "user-1", new BigDecimal("100.00"), "SGD");
 
     Map<String, Object> body = Map.of(
         "fromAccountId", fromAccount,
@@ -355,5 +379,163 @@ class LedgerControllerIntegrationTest {
         new HttpEntity<>(null, headersFor("user-2")),
         Map.class);
     assertThat(rateAsStranger.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+  }
+
+  /**
+   * The actual proof for the race raised in review: at the default
+   * READ_COMMITTED isolation, two concurrent {@code hold()} calls on the
+   * SAME account could each read a balance that individually looks
+   * sufficient, both pass the check, and both debit — overdrawing the
+   * account despite each check being individually correct. Funds exactly
+   * one hold's worth, fires two hold requests at the same account
+   * simultaneously (a {@link java.util.concurrent.CyclicBarrier} to
+   * maximize actual overlap, not just "started close together"), and
+   * asserts EXACTLY one succeeds — never both, never a silent overdraw.
+   */
+  @Test
+  void concurrentHoldsOnTheSameAccountNeverBothSucceed() throws Exception {
+    UUID account = UUID.randomUUID();
+    fundAccount(account, "user-1", new BigDecimal("100.00"), "SGD");
+
+    Map<String, Object> body = Map.of(
+        "fromAccountId", account, "amount", new BigDecimal("100.00"), "currencyCode", "SGD");
+    HttpHeaders headers = headersFor("user-1");
+    java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(2);
+
+    java.util.concurrent.Callable<ResponseEntity<Map>> holdAttempt = () -> {
+      barrier.await(); // both threads block here until both are ready, then release together
+      return restTemplate.exchange(
+          "/v1/ledger/sagas/" + UUID.randomUUID() + "/hold",
+          org.springframework.http.HttpMethod.POST,
+          new HttpEntity<>(body, headers),
+          Map.class);
+    };
+
+    java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+    try {
+      java.util.concurrent.Future<ResponseEntity<Map>> first = pool.submit(holdAttempt);
+      java.util.concurrent.Future<ResponseEntity<Map>> second = pool.submit(holdAttempt);
+      HttpStatus statusA = (HttpStatus) first.get().getStatusCode();
+      HttpStatus statusB = (HttpStatus) second.get().getStatusCode();
+
+      long successCount = List.of(statusA, statusB).stream().filter(s -> s == HttpStatus.OK).count();
+      assertThat(successCount).as("exactly one of the two concurrent holds should succeed").isEqualTo(1);
+      // The loser normally gets a clean 422 insufficient-funds rejection —
+      // the guarded UPDATE's row lock makes it wait for the winner to
+      // commit, then re-evaluate its own WHERE clause against the
+      // now-debited balance (other-docs/12 Decision 4). A 503 is still
+      // allowed here defensively (a genuine multi-row deadlock is possible
+      // in general, just not expected in this specific single-row
+      // scenario) — either outcome is correct, both mean nothing was
+      // silently overdrawn.
+      HttpStatus loserStatus = statusA == HttpStatus.OK ? statusB : statusA;
+      assertThat(loserStatus).isIn(HttpStatus.UNPROCESSABLE_ENTITY, HttpStatus.SERVICE_UNAVAILABLE);
+    } finally {
+      pool.shutdown();
+    }
+  }
+
+  /**
+   * Proves the lock-ordering fix (other-docs/08 Decision 32,
+   * {@code LedgerService#applyBalanceDeltas}), not just reasons about it.
+   *
+   * <p>{@code HOLD} on account A locks {@code [A, HOLD_POOL]} in that
+   * order; {@code RELEASE} back into account A locks {@code [HOLD_POOL,
+   * A]} — the REVERSE order — since a release's legs are constructed as
+   * {@code [sourcePool, accountId]}. Two different, entirely unrelated
+   * sagas doing exactly that at the same instant is the textbook
+   * deadlock precondition: each holds one of the two shared rows and
+   * waits for the other. Run repeatedly (deadlocks are timing-dependent,
+   * not everywhere-or-nowhere) to give a lingering ordering bug a real
+   * chance to surface as a flaky 503, rather than proving nothing by
+   * relying on a single lucky interleaving.
+   */
+  @Test
+  void aHoldAndAReleaseRacingOnTheSameAccountNeverDeadlock() throws Exception {
+    UUID account = UUID.randomUUID();
+    fundAccount(account, "user-1", new BigDecimal("10000.00"), "SGD");
+    HttpHeaders headers = headersFor("user-1");
+
+    for (int i = 0; i < 20; i++) {
+      // An unrelated saga, already HELD elsewhere, now being compensated
+      // back into the SAME account the concurrent fresh HOLD below will
+      // also touch — the only way both legs can land on the same two
+      // account_balances rows (the account, and the shared HOLD_POOL row).
+      UUID priorSaga = UUID.randomUUID();
+      Map<String, Object> priorHoldBody = Map.of(
+          "fromAccountId", account, "amount", new BigDecimal("1.00"), "currencyCode", "SGD");
+      restTemplate.exchange("/v1/ledger/sagas/" + priorSaga + "/hold",
+          org.springframework.http.HttpMethod.POST, new HttpEntity<>(priorHoldBody, headers), Map.class);
+
+      Map<String, Object> releaseBody = Map.of(
+          "accountId", account, "amount", new BigDecimal("1.00"), "currencyCode", "SGD",
+          "reason", "test compensation");
+      Map<String, Object> freshHoldBody = Map.of(
+          "fromAccountId", account, "amount", new BigDecimal("1.00"), "currencyCode", "SGD");
+
+      java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(2);
+      java.util.concurrent.Callable<ResponseEntity<Map>> releaseAttempt = () -> {
+        barrier.await();
+        return restTemplate.exchange("/v1/ledger/sagas/" + priorSaga + "/release",
+            org.springframework.http.HttpMethod.POST, new HttpEntity<>(releaseBody, headers), Map.class);
+      };
+      java.util.concurrent.Callable<ResponseEntity<Map>> freshHoldAttempt = () -> {
+        barrier.await();
+        return restTemplate.exchange("/v1/ledger/sagas/" + UUID.randomUUID() + "/hold",
+            org.springframework.http.HttpMethod.POST, new HttpEntity<>(freshHoldBody, headers), Map.class);
+      };
+
+      java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+      try {
+        java.util.concurrent.Future<ResponseEntity<Map>> releaseFuture = pool.submit(releaseAttempt);
+        java.util.concurrent.Future<ResponseEntity<Map>> holdFuture = pool.submit(freshHoldAttempt);
+        HttpStatus releaseStatus = (HttpStatus) releaseFuture.get().getStatusCode();
+        HttpStatus holdStatus = (HttpStatus) holdFuture.get().getStatusCode();
+
+        // Lock ordering makes the deadlock IMPOSSIBLE, not just unlikely —
+        // a 503 here would mean the fix regressed, not just bad luck.
+        assertThat(releaseStatus).as("iteration %d: release should never deadlock", i).isEqualTo(HttpStatus.OK);
+        assertThat(holdStatus).as("iteration %d: hold should never deadlock", i).isEqualTo(HttpStatus.OK);
+      } finally {
+        pool.shutdown();
+      }
+    }
+  }
+
+  @Test
+  void accountHistoryReturnsEveryLegForThatAccountNewestFirst() throws Exception {
+    UUID account = UUID.randomUUID();
+    fundAccount(account, "user-1", new BigDecimal("100.00"), "SGD"); // DEPOSIT_CR
+
+    UUID sagaId = UUID.randomUUID();
+    Map<String, Object> holdBody = Map.of(
+        "fromAccountId", account, "amount", new BigDecimal("40.00"), "currencyCode", "SGD");
+    restTemplate.exchange(
+        "/v1/ledger/sagas/" + sagaId + "/hold", org.springframework.http.HttpMethod.POST,
+        new HttpEntity<>(holdBody, headersFor("user-1")), Map.class); // HOLD_DR
+
+    ResponseEntity<List> response = restTemplate.exchange(
+        "/v1/ledger/accounts/" + account + "/history", org.springframework.http.HttpMethod.GET,
+        new HttpEntity<>(null, headersFor("user-1")), List.class);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(response.getBody()).hasSize(2);
+    // Newest first — HOLD_DR (just written) before the earlier DEPOSIT_CR.
+    assertThat(((Map<?, ?>) response.getBody().get(0)).get("entryType")).isEqualTo("HOLD_DR");
+    assertThat(((Map<?, ?>) response.getBody().get(1)).get("entryType")).isEqualTo("DEPOSIT_CR");
+  }
+
+  @Test
+  void accountHistoryRespectsALimitParameter() throws Exception {
+    UUID account = UUID.randomUUID();
+    fundAccount(account, "user-1", new BigDecimal("10.00"), "SGD");
+    fundAccount(account, "user-1", new BigDecimal("10.00"), "SGD");
+    fundAccount(account, "user-1", new BigDecimal("10.00"), "SGD");
+
+    ResponseEntity<List> response = restTemplate.exchange(
+        "/v1/ledger/accounts/" + account + "/history?limit=1", org.springframework.http.HttpMethod.GET,
+        new HttpEntity<>(null, headersFor("user-1")), List.class);
+
+    assertThat(response.getBody()).hasSize(1);
   }
 }

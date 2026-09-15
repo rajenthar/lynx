@@ -4,9 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.lynx.common.error.BusinessRuleException;
 import com.lynx.common.error.ConflictException;
 import com.lynx.idempotency.IdempotencyGuard;
 import com.lynx.idempotency.InMemoryIdempotencyCache;
@@ -18,6 +22,7 @@ import com.lynx.ledger.domain.SagaPhase;
 import com.lynx.ledger.domain.SystemAccounts;
 import com.lynx.ledger.dto.LedgerLegView;
 import com.lynx.ledger.dto.LedgerPhaseResponse;
+import com.lynx.ledger.repository.AccountBalanceRepository;
 import com.lynx.ledger.repository.FxRateLockRepository;
 import com.lynx.ledger.repository.LedgerEntryRepository;
 import com.lynx.ledger.repository.OutboxEntryRepository;
@@ -31,7 +36,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -49,6 +53,7 @@ class LedgerServiceTest {
   private LedgerEntryRepository ledgerEntryRepository;
   private OutboxEntryRepository outboxEntryRepository;
   private FxRateLockRepository fxRateLockRepository;
+  private AccountBalanceRepository accountBalanceRepository;
   private LedgerService ledgerService;
   private final List<LedgerEntry> savedLegs = new ArrayList<>();
 
@@ -57,7 +62,11 @@ class LedgerServiceTest {
     ledgerEntryRepository = mock(LedgerEntryRepository.class);
     outboxEntryRepository = mock(OutboxEntryRepository.class);
     fxRateLockRepository = mock(FxRateLockRepository.class);
+    accountBalanceRepository = mock(AccountBalanceRepository.class);
     when(fxRateLockRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    // Sufficient by default — individual tests override this to exercise
+    // the insufficient-funds path (see AccountBalanceRepository#debitIfSufficient).
+    when(accountBalanceRepository.debitIfSufficient(any(), any(), any())).thenReturn(1);
 
     when(ledgerEntryRepository.saveAll(any())).thenAnswer(inv -> {
       List<LedgerEntry> legs = inv.getArgument(0);
@@ -73,16 +82,24 @@ class LedgerServiceTest {
     });
     when(outboxEntryRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-    TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
-    when(transactionTemplate.execute(any())).thenAnswer(inv -> {
-      TransactionCallback<?> callback = inv.getArgument(0);
-      return callback.doInTransaction(mock(TransactionStatus.class));
-    });
+    // A real (trivial) subclass, not a Mockito mock — TransactionTemplate is
+    // a concrete class, and this JDK's Mockito inline mock maker can't
+    // instrument concrete classes (Byte Buddy/JDK 25, same issue
+    // auth-service's JwtIssuerTest hit). Repeatedly mock()-ing
+    // TransactionStatus (an interface) turned out to be unreliable here too
+    // once this many test methods run in one JVM — Spring's own ready-made
+    // no-op implementation sidesteps Mockito for this dependency entirely.
+    TransactionTemplate transactionTemplate = new TransactionTemplate() {
+      @Override
+      public <T> T execute(TransactionCallback<T> action) {
+        return action.doInTransaction(new org.springframework.transaction.support.SimpleTransactionStatus());
+      }
+    };
 
     IdempotencyGuard idempotencyGuard = new IdempotencyGuard(new InMemoryIdempotencyCache());
     ledgerService = new LedgerService(
         ledgerEntryRepository, outboxEntryRepository, fxRateLockRepository,
-        idempotencyGuard, transactionTemplate);
+        accountBalanceRepository, idempotencyGuard, transactionTemplate);
   }
 
   private static void setId(OutboxEntry entry, long id) {
@@ -112,6 +129,70 @@ class LedgerServiceTest {
     assertEquals(SystemAccounts.HOLD_POOL, cr.accountId());
     assertEquals(0, dr.amount().compareTo(cr.amount()));
     assertEquals(2, savedLegs.size());
+  }
+
+  @Test
+  void holdChecksTheAccountsExistingBalanceFirst() {
+    UUID fromAccount = UUID.randomUUID();
+    Money amount = Money.of(new BigDecimal("100.00"), Money.currencyOf("SGD"));
+
+    ledgerService.hold(UUID.randomUUID(), "user-1", fromAccount, amount);
+
+    // The whole point of other-docs/12 Decision 4: this is ONE atomic
+    // conditional UPDATE (other-docs/12), not a separate read then a
+    // separate decision — see AccountBalanceRepository#debitIfSufficient.
+    verify(accountBalanceRepository).debitIfSufficient(fromAccount, "SGD", new BigDecimal("100.00"));
+  }
+
+  @Test
+  void holdRejectsWithInsufficientFundsWithoutCompletingTheWrite() {
+    UUID fromAccount = UUID.randomUUID();
+    // 0 rows affected — the guarded UPDATE's WHERE clause didn't match
+    // (insufficient balance, or no row yet for a never-funded account).
+    when(accountBalanceRepository.debitIfSufficient(eq(fromAccount), eq("SGD"), any())).thenReturn(0);
+    Money amount = Money.of(new BigDecimal("100.00"), Money.currencyOf("SGD"));
+
+    assertThrows(BusinessRuleException.class, () ->
+        ledgerService.hold(UUID.randomUUID(), "user-1", fromAccount, amount));
+    // The outbox row is written AFTER the balance check, in the same
+    // transaction — this test's mocked repositories don't roll back
+    // saveAll() the way a real Postgres transaction would (that's
+    // separately proven, against real Postgres, by
+    // concurrentHoldsOnTheSameAccountNeverBothSucceed), but never reaching
+    // the outbox write IS something this mock reflects correctly.
+    verify(outboxEntryRepository, never()).saveAndFlush(any());
+  }
+
+  @Test
+  void holdSucceedsWhenTheGuardedUpdateAffectsARow() {
+    UUID fromAccount = UUID.randomUUID();
+    when(accountBalanceRepository.debitIfSufficient(eq(fromAccount), eq("SGD"), any())).thenReturn(1);
+    Money amount = Money.of(new BigDecimal("100.00"), Money.currencyOf("SGD"));
+
+    LedgerPhaseResponse response = ledgerService.hold(UUID.randomUUID(), "user-1", fromAccount, amount);
+
+    assertEquals(2, response.legs().size());
+  }
+
+  @Test
+  void depositWritesFundingSourceToAccountLegsWithNoGuardedCheck() {
+    UUID depositId = UUID.randomUUID();
+    UUID account = UUID.randomUUID();
+    Money amount = Money.of(new BigDecimal("500.00"), Money.currencyOf("SGD"));
+
+    LedgerPhaseResponse response = ledgerService.deposit(depositId, "user-1", account, amount);
+
+    assertEquals(2, response.legs().size());
+    LedgerLegView dr = response.legs().get(0);
+    LedgerLegView cr = response.legs().get(1);
+    assertEquals(EntryType.DEPOSIT_DR, dr.entryType());
+    assertEquals(SystemAccounts.FUNDING_SOURCE, dr.accountId());
+    assertEquals(EntryType.DEPOSIT_CR, cr.entryType());
+    assertEquals(account, cr.accountId());
+    // Crediting can never overdraw — the guarded conditional update is HOLD_DR-only.
+    verify(accountBalanceRepository, never()).debitIfSufficient(any(), any(), any());
+    verify(accountBalanceRepository).adjustUnconditionally(SystemAccounts.FUNDING_SOURCE, "SGD", new BigDecimal("500.00").negate());
+    verify(accountBalanceRepository).adjustUnconditionally(account, "SGD", new BigDecimal("500.00"));
   }
 
   @Test
