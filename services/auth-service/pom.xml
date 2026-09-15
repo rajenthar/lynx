@@ -18,6 +18,14 @@
   <name>auth-service</name>
   <description>Issues RS256 JWTs — end-user login (Postgres-backed) and OAuth2 Client Credentials service tokens (ADR-007); publishes the verification JWKS every other service already expects</description>
 
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>com.lynx</groupId>

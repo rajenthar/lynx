@@ -29,6 +29,15 @@ CREATE TABLE ledger (
 
 CREATE INDEX idx_ledger_saga_id ON ledger (saga_id, created_at);
 
+-- Per-account audit trail (GET /v1/ledger/accounts/{accountId}/history) —
+-- the append-only ledger itself IS the audit record (deposits/withdrawals
+-- were always written here; account_balances above is only ever a fast
+-- CURRENT-total cache, never the history). Real ledger systems keep this
+-- query separate from the fast running balance rather than replacing it
+-- (TigerBeetle's get_account_transfers; Modern Treasury's List Ledger
+-- Entries) — same reasoning here.
+CREATE INDEX idx_ledger_account_id ON ledger (account_id, created_at);
+
 -- outbox: transactional-outbox pattern (ADR-002) — every domain event is
 -- written in the SAME transaction as its ledger legs, then relayed to
 -- Kafka via CDC (Debezium), never published directly by this service.
@@ -71,4 +80,32 @@ CREATE TABLE fx_rate_locks (
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (user_id, saga_id)
+);
+
+-- account_balances: a materialized running balance per (account_id,
+-- currency), maintained SYNCHRONOUSLY alongside every ledger leg — the
+-- industry-standard pattern (TigerBeetle's debits/credits_pending/posted
+-- fields; Modern Treasury's Ledgers API, which posts a transaction only
+-- if it satisfies a balance precondition checked in the SAME atomic
+-- write), not the `SUM(...)` over ledger history this replaced
+-- (other-docs/12 Decision 4). O(1) regardless of how many legs this
+-- account has ever had, and needs no elevated transaction isolation:
+-- a plain row-level UPDATE naturally serializes concurrent writers to the
+-- SAME row (the second waits for the first's row lock, then re-evaluates
+-- its own WHERE clause against the now-current balance) — see
+-- LedgerService#applyBalanceDelta / #debitIfSufficient.
+--
+-- This is NOT account-service's own `accounts` table (other-docs/12) —
+-- that one is an async, eventually-consistent PROJECTION for display,
+-- built from Kafka events, and is never consulted for a financial
+-- decision. This table is ledger-service's own synchronous source of
+-- truth for "can this debit happen right now," covering every account
+-- that has ever appeared in a ledger leg — real accounts AND system
+-- accounts alike (HOLD_POOL/FX_LOCK/FUNDING_SOURCE included, which are
+-- expected to run negative — see SystemAccounts' own javadoc).
+CREATE TABLE account_balances (
+  account_id UUID NOT NULL,
+  currency VARCHAR(3) NOT NULL,
+  balance NUMERIC(19,4) NOT NULL,
+  PRIMARY KEY (account_id, currency)
 );

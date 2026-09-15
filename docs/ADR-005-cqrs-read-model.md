@@ -1,6 +1,14 @@
 # ADR-005: account-service as Pure CQRS Read Model
 
-**Status:** Accepted
+**Status:** Accepted and built (other-docs/12) — `account-service` exists,
+consumes `ledger-service`'s outbox via a real Debezium connector →
+Redpanda → a plain `@KafkaListener` (`OutboxEventConsumer`/`EventProjector`),
+and maintains `available`/`held` directly on its own `accounts` row per
+event, idempotent via a `last_event_id` offset guard exactly as this ADR
+originally specified. The Redis-in-front-of-Postgres caching layer
+described below ("we DO use Redis — but in FRONT of the Postgres
+projection") was NOT built in this pass — reads go straight to Postgres;
+revisit only if read volume is ever actually observed to need it.
 
 **Date:** 2026-07-04
 

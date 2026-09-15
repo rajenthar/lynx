@@ -9,7 +9,7 @@ package com.lynx.events;
  * later forces a conscious update everywhere one is handled.
  */
 public sealed interface DomainEvent
-    permits TransferHeld, RateLocked, TransferSettled, TransferFailed {
+    permits TransferHeld, RateLocked, TransferSettled, TransferFailed, FundsDeposited {
 
   EventType eventType();
 }

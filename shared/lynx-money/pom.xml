@@ -18,6 +18,14 @@
   <name>lynx-money</name>
   <description>Currency-aware, BigDecimal-backed Money value type. Zero external dependencies.</description>
 
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
   <!--
     Deliberately dependency-free (JDK only).
     Money is the most widely reused type in the system; it must not drag any

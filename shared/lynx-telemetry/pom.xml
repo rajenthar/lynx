@@ -24,6 +24,14 @@
     Phase 0.9's infra, not shared Java code.
   </description>
 
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
   <!--
     OpenTelemetry's own BOM, imported here (not the root pom — no other module
     needs OTel). This is the same lesson as the root pom's Spring Boot BOM:

@@ -18,6 +18,14 @@
   <name>lynx-security</name>
   <description>JWT (RS256) verification with JWKS caching, user-context extraction, correlation-ID propagation</description>
 
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
   <dependencies>
     <!-- Error model (AuthException 401/403) -->
     <dependency>

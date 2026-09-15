@@ -1,0 +1,80 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: account-service
+  datasource:
+    url: jdbc:postgresql://localhost:5433/lynx
+    username: lynx
+    password: lynx
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: localhost:19092
+    consumer:
+      group-id: account-service
+      # Rebuild the WHOLE projection from history on a fresh instance
+      # (ADR-005: this table is a derived, disposable view) — not "only new
+      # events from now on", which is what a normal consumer usually wants.
+      auto-offset-reset: earliest
+      # Manual, per-record commit instead (see listener.ack-mode below) —
+      # Kafka's own periodic auto-commit would advance the offset on a
+      # timer regardless of whether OutboxEventConsumer actually finished
+      # processing, which could commit past a record that failed.
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      # other-docs/12 Decision 7: commit each record's offset only after
+      # OutboxEventConsumer.onMessage calls ack.acknowledge() itself, which
+      # only happens after EventProjector.apply() returns successfully.
+      ack-mode: manual_immediate
+    producer:
+      # Only ever used for BeansConfig's DeadLetterPublishingRecoverer
+      # (other-docs/12 Decision 8) — this service publishes nothing else.
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-},%X{correlationId:-}]"
+
+lynx:
+  security:
+    jwks-url: http://localhost:8080/auth/.well-known/jwks.json
+    issuer: https://auth.lynx
+    audience: lynx-api
+  # ADR-007: this service's OWN identity when calling ledger-service's
+  # deposit endpoint. Seeded into auth-service's service_clients table at
+  # ITS startup — see other-docs/12 and auth-service's ServiceClientSeeder.
+  service-token:
+    token-endpoint: http://localhost:8080/auth/token
+    client-id: account-service
+    client-secret: placeholder-not-a-real-secret
+  clients:
+    ledger-service:
+      base-url: http://localhost:8081
+  kafka:
+    # The topic Debezium's connector produces to (topic.prefix=lynx,
+    # schema=public, table=outbox) — see infra/debezium/ledger-outbox-connector.json.
+    outbox-topic: lynx.public.outbox

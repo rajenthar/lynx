@@ -12,5 +12,8 @@ public enum EntryType {
   SETTLE_DR,
   SETTLE_CR,
   RELEASE_DR,
-  RELEASE_CR
+  RELEASE_CR,
+  /** Not a saga phase (other-docs/12) — a direct deposit from {@link SystemAccounts#FUNDING_SOURCE}. */
+  DEPOSIT_DR,
+  DEPOSIT_CR
 }

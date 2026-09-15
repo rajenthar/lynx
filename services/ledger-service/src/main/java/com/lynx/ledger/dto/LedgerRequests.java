@@ -10,8 +10,8 @@ import java.util.UUID;
  * <p>{@code onBehalfOfUserId} is ADR-007 Option C's on-behalf-of field: only
  * present/honored when the caller authenticated as an internal service (a
  * token carrying the {@code internal-service} role, see
- * {@code LedgerController#userId}) — a normal end-user token must never send
- * it, and {@code LedgerController} rejects the request if one does.
+ * {@code TrustedCaller#userId}) — a normal end-user token must never send
+ * it, and it's rejected if one does.
  */
 public final class LedgerRequests {
 
@@ -34,6 +34,11 @@ public final class LedgerRequests {
   public record ReleaseRequest(
       UUID accountId, BigDecimal amount, String currencyCode, String reason,
       String onBehalfOfUserId) {
+  }
+
+  /** other-docs/12 — {@code accountId} is the account being credited, not a saga counterparty. */
+  public record DepositRequest(
+      UUID accountId, BigDecimal amount, String currencyCode, String onBehalfOfUserId) {
   }
 
   private LedgerRequests() {
