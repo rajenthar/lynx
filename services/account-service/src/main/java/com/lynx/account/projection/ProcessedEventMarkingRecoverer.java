@@ -10,14 +10,7 @@ import org.springframework.kafka.listener.ConsumerRecordRecoverer;
  * Wraps a delegate recoverer (a {@code DeadLetterPublishingRecoverer} —
  * see {@code BeansConfig}) to ALSO record the failed event's id in {@code
  * processed_events}, right after the delegate has actually published it
- * to the dead-letter topic (other-docs/12 Decision 8, raised directly on
- * review: "even for error messages we need to store the processedEvent" —
- * without this, a redelivery of the exact same record — a rebalance, a
- * retry racing the DLT publish, etc. — would get sent to the DLT a SECOND
- * time; {@link OutboxEventConsumer}'s own {@code existsById} short-circuit
- * is what actually prevents that, and it needs this row to exist for a
- * dead-lettered event exactly the same way it needs one for a
- * successfully-applied event).
+ * to the dead-letter topic.
  *
  * <p>Deliberately best-effort for the id extraction ({@link
  * OutboxEventConsumer#extractEventIdOrNull}) — the delegate's own dead-letter

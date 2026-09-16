@@ -44,8 +44,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * SERIALIZABLE transactions hitting the real UNIQUE constraint — the
  * genuine proof java-docs/04 promised for this exact scenario.
  *
- * <p>No {@code Idempotency-Key} header (other-docs/08
- * Decision 29) — a retry is just calling the same phase endpoint again for
+ * <p>No {@code Idempotency-Key} header — a retry is just calling the same phase endpoint again for
  * the same {@code sagaId}; {@code (userId, sagaId, phase)} is the whole
  * identity now.
  */
@@ -140,8 +139,8 @@ class LedgerControllerIntegrationTest {
   }
 
   /**
-   * other-docs/12: {@code hold()} now checks the account's existing balance
-   * first (other-docs/08 Decision 23) — every test that expects a HOLD to
+   * {@code hold()} now checks the account's existing balance
+   * first — every test that expects a HOLD to
    * actually succeed must fund the account first, exactly the way a real
    * caller would (via the new deposit endpoint), not just assume an
    * arbitrary fresh {@code UUID} account can be debited.
@@ -305,7 +304,7 @@ class LedgerControllerIntegrationTest {
 
   @Test
   void auditTrailIsScopedToTheCallingUserNotJustTheSagaId() throws Exception {
-    // other-docs/08 Decision 31: a different authenticated user asking for
+    // A different authenticated user asking for
     // someone else's sagaId must not see its legs — an empty audit trail,
     // not user-1's real ones, even though the saga genuinely exists.
     UUID sagaId = UUID.randomUUID();
@@ -423,7 +422,7 @@ class LedgerControllerIntegrationTest {
       // The loser normally gets a clean 422 insufficient-funds rejection —
       // the guarded UPDATE's row lock makes it wait for the winner to
       // commit, then re-evaluate its own WHERE clause against the
-      // now-debited balance (other-docs/12 Decision 4). A 503 is still
+      // now-debited balance. A 503 is still
       // allowed here defensively (a genuine multi-row deadlock is possible
       // in general, just not expected in this specific single-row
       // scenario) — either outcome is correct, both mean nothing was
@@ -436,8 +435,7 @@ class LedgerControllerIntegrationTest {
   }
 
   /**
-   * Proves the lock-ordering fix (other-docs/08 Decision 32,
-   * {@code LedgerService#applyBalanceDeltas}), not just reasons about it.
+   * Proves the lock-ordering fix, not just reasons about it.
    *
    * <p>{@code HOLD} on account A locks {@code [A, HOLD_POOL]} in that
    * order; {@code RELEASE} back into account A locks {@code [HOLD_POOL,

@@ -8,8 +8,8 @@
 -- policy (an expired LOCK is always released, never re-locked within the
 -- SAME saga — a retry gets a brand-new sagaId instead), each phase happens
 -- AT MOST ONCE per saga, forever, so (userId, sagaId, entry_type) alone is
--- sufficient — no separate client-supplied idempotency key is needed (see
--- other-docs/08 Decision 29). user_id also closes a saga_id-collision gap:
+-- sufficient — no separate client-supplied idempotency key is needed.
+-- user_id also closes a saga_id-collision gap:
 -- saga_id is deterministically derived (userId + a client Idempotency-Key,
 -- upstream of this service — see ADR-004), so it can't be mathematically
 -- guaranteed collision-free; the composite constraint means a collision
@@ -45,7 +45,7 @@ CREATE INDEX idx_ledger_account_id ON ledger (account_id, created_at);
 -- outbox isn't itself idempotency-protected (the ledger insert above
 -- always runs first in the same transaction and is what actually rejects
 -- a retry). It exists purely so a saga_id collision between two different
--- users (other-docs/08 Decision 29) still leaves their outbox rows
+-- users still leaves their outbox rows
 -- individually filterable, instead of indistinguishable except by
 -- decoding each row's JSON payload by hand.
 CREATE TABLE outbox (
@@ -62,7 +62,7 @@ CREATE TABLE outbox (
 CREATE INDEX idx_outbox_status_created ON outbox (status, created_at);
 
 -- fx_rate_locks: one row per saga's LOCK phase — the FX rate a saga
--- committed to, plus that quote's own expiry (other-docs/09 Decision 6).
+-- committed to, plus that quote's own expiry.
 -- Deliberately its own table, not columns on the ledger's LOCK_DR/LOCK_CR
 -- legs: it's one fact per saga, not one fact per leg, and a commitment
 -- with its own lifecycle rather than a plain money-movement record.
@@ -88,14 +88,14 @@ CREATE TABLE fx_rate_locks (
 -- fields; Modern Treasury's Ledgers API, which posts a transaction only
 -- if it satisfies a balance precondition checked in the SAME atomic
 -- write), not the `SUM(...)` over ledger history this replaced
--- (other-docs/12 Decision 4). O(1) regardless of how many legs this
+--. O(1) regardless of how many legs this
 -- account has ever had, and needs no elevated transaction isolation:
 -- a plain row-level UPDATE naturally serializes concurrent writers to the
 -- SAME row (the second waits for the first's row lock, then re-evaluates
 -- its own WHERE clause against the now-current balance) — see
 -- LedgerService#applyBalanceDelta / #debitIfSufficient.
 --
--- This is NOT account-service's own `accounts` table (other-docs/12) —
+-- This is NOT account-service's own `accounts` table —
 -- that one is an async, eventually-consistent PROJECTION for display,
 -- built from Kafka events, and is never consulted for a financial
 -- decision. This table is ledger-service's own synchronous source of

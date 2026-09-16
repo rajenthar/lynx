@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
  * Option C, {@code ServiceTokenProvider} + an {@code internal-service}
  * role check) — that mechanism already exists in {@code lynx-security},
  * ready to reuse, not redesigned here. Tracked as an open item, not an
- * oversight — see other-docs/09.
+ * oversight.
  */
 @RestController
 @RequestMapping("/v1/fx/executions")

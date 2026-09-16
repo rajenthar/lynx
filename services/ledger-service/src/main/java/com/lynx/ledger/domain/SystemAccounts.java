@@ -17,7 +17,7 @@ public final class SystemAccounts {
       UUID.fromString("00000000-0000-0000-0000-000000000002");
 
   /**
-   * Counterparty for DEPOSIT_DR (other-docs/12) — money entering the system
+   * Counterparty for DEPOSIT_DR — money entering the system
    * from outside it. Unlike {@link #HOLD_POOL}/{@link #FX_LOCK}, this
    * account's balance is expected to run permanently negative (every
    * deposit debits it) — that's correct, not an invariant violation: it

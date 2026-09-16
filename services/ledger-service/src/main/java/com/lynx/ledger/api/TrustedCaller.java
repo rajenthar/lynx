@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
  * ADR-007 Option C's trust boundary, extracted so every controller in this
  * service enforces it identically — originally {@code LedgerController}'s
  * own private {@code userId(...)} helper, pulled out once
- * {@code LedgerDepositController} (other-docs/12) needed the exact same
+ * {@code LedgerDepositController} needed the exact same
  * logic: an ordinary end-user token's own {@code sub} claim is used as-is;
  * a token carrying the {@code internal-service} role MUST supply {@code
  * onBehalfOfUserId} (401 if it doesn't), and only such a caller may supply

@@ -22,7 +22,7 @@ public class MockQuoteProvider implements QuoteProvider {
 
   private static final Logger log = LoggerFactory.getLogger(MockQuoteProvider.class);
 
-  /** Real quotes are only valid briefly — real market rates move fast; see other-docs/09 Decision 6. */
+  /** Real quotes are only valid briefly — real market rates move fast. */
   static final Duration QUOTE_TTL = Duration.ofSeconds(60);
 
   private static final Map<String, BigDecimal> RATES = Map.of(

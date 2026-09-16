@@ -13,8 +13,8 @@ import org.springframework.context.annotation.Import;
  * (register/login/token/jwks) is either public by design or authenticates
  * its caller with its own explicit logic ({@code TokenController}'s Basic
  * auth decode), never a bearer JWT this service itself issues. Activates the
- * shared {@link GlobalExceptionHandler} explicitly, per other-docs/01's
- * deferred-introduction design.
+ * shared {@link GlobalExceptionHandler} explicitly — a deliberate,
+ * deferred introduction rather than auto-scanning.
  */
 @Configuration
 @Import(GlobalExceptionHandler.class)

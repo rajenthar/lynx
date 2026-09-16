@@ -15,8 +15,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * responses, one HTTP status per {@code ErrorCode}.
  *
  * <p>Not auto-scanned: services opt in explicitly via
- * {@code @Import(GlobalExceptionHandler.class)} (see other-docs/01, Decision
- * on this class's deferred introduction) so a service that isn't a web
+ * {@code @Import(GlobalExceptionHandler.class)} so a service that isn't a web
  * application never pulls in spring-webmvc.
  *
  * <p>Reads the correlation id straight out of SLF4J's MDC under the

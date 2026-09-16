@@ -24,7 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Drives one saga from {@code HOLDING} to {@code SETTLED} (or {@code FAILED}),
- * one phase at a time, per other-docs/10's plan. Called from
+ * one phase at a time, per the plan. Called from
  * {@link com.lynx.orchestrator.scheduler.SagaPollingScheduler}'s
  * {@code @Scheduled} methods, never directly by a client request — a batch
  * IS one transaction (the {@code FOR UPDATE SKIP LOCKED} claim's lock only
@@ -54,15 +54,10 @@ public class SagaOrchestratorService {
   }
 
   /**
-   * The one internal, service-to-service entry point (other-docs/10
-   * Decision 3) — called by whatever already decided this saga should
-   * exist (a future {@code transaction-service}), never by an end-user
+   * The one internal, service-to-service entry point — called by whatever already decided this saga should
+   * exist ({@code transaction-service}), never by an end-user
    * request directly. Idempotent on {@code (sagaId, userId)}, not
-   * {@code sagaId} alone (other-docs/10 Decision 7 — {@code sagaId} can
-   * theoretically collide between two unrelated users; scoping by
-   * {@code userId} too means a collision surfaces as a harmless,
-   * coexisting extra row instead of one caller silently being handed
-   * someone else's saga and never actually holding their own funds).
+   * {@code sagaId} alone.
    * {@code ledger-service}'s own {@code hold} is already idempotent per
    * {@code (userId, sagaId, HOLD)}, so a genuine race here (two concurrent
    * calls for the same brand-new sagaId+userId) is harmless either way;
@@ -107,10 +102,9 @@ public class SagaOrchestratorService {
   /**
    * Plain read — GET, no idempotency guard, same reasoning as
    * ledger-service's audit trail. Scoped to {@code (sagaId, userId)} for
-   * the same collision reason as {@link #createSaga} (other-docs/10
-   * Decision 7) — a saga belonging to a different user reads back as this
+   * the same collision reason as {@link #createSaga} — a saga belonging to a different user reads back as this
    * same 404, same "don't confirm existence to a non-owner" reasoning as
-   * ledger-service's own scoped reads (other-docs/08 Decision 31).
+   * ledger-service's own scoped reads.
    */
   public SagaState findOrThrow(UUID sagaId, String userId) {
     return repository.findBySagaIdAndUserId(sagaId, userId)
@@ -151,8 +145,7 @@ public class SagaOrchestratorService {
       } catch (SagaStepFailedException e) {
         compensate(saga, e.getMessage());
       } catch (DownstreamUnavailableException e) {
-        // Deliberately no mutation here — other-docs/10's confirmed
-        // decision: a transient failure leaves the saga at its CURRENT
+        // Deliberately no mutation here: a transient failure leaves the saga at its CURRENT
         // status, untouched. The row lock releases at this transaction's
         // commit either way; the next poll (or the recovery worker, if
         // this keeps failing) simply claims it again and retries the
@@ -184,7 +177,7 @@ public class SagaOrchestratorService {
     if (saga.getRateExpiresAt() != null && Instant.now().isAfter(saga.getRateExpiresAt())) {
       // ADR-003's rate-lock expiry policy (Option B, decided): release only,
       // never silently re-lock the same saga. A retry, if wanted, is a
-      // brand-new saga — out of scope here (other-docs/10 Decision 2).
+      // brand-new saga — out of scope here.
       throw new SagaStepFailedException("Locked rate expired before execution (expired at "
           + saga.getRateExpiresAt() + ")");
     }
@@ -201,7 +194,7 @@ public class SagaOrchestratorService {
 
   private void settle(SagaState saga) {
     // SETTLE credits using EXECUTE's actual filledRate, not the original
-    // quoted rate — other-docs/10 Decision 1: today's MockFxProvider always
+    // quoted rate — today's MockFxProvider always
     // fills at exactly the requested rate, so there's no visible difference
     // yet, but filledRate is the value that's actually true.
     Money debited = Money.of(saga.getAmount(), Money.currencyOf(saga.getFromCurrency()));

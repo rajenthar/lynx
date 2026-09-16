@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * End-user registration and login (other-docs/11 Decision 1). Both public —
+ * End-user registration and login. Both public —
  * no {@code Authorization} header expected on either call, unlike every
  * other Lynx controller.
  */

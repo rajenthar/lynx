@@ -10,8 +10,7 @@ import org.hibernate.type.SqlTypes;
 
 /**
  * A registered internal caller allowed to request a service-identity token
- * via the OAuth2 Client Credentials grant (other-docs/11 Decision 3;
- * ADR-007 Option C). Stored in Postgres rather than static config so a new
+ * via the OAuth2 Client Credentials grant. Stored in Postgres rather than static config so a new
  * caller can be registered without a redeploy, and so the secret is never
  * held in plaintext anywhere, including this service's own database.
  *

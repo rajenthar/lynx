@@ -7,6 +7,8 @@ import com.lynx.account.dto.AccountDtos.AccountView;
 import com.lynx.account.dto.AccountDtos.CreateAccountRequest;
 import com.lynx.account.dto.AccountDtos.DepositAcceptedView;
 import com.lynx.account.dto.AccountDtos.DepositRequest;
+import com.lynx.account.dto.AccountDtos.ResolveTransferRequest;
+import com.lynx.account.dto.AccountDtos.ResolvedTransferAccountsView;
 import com.lynx.money.Money;
 import com.lynx.security.JwtVerifier;
 import com.nimbusds.jose.JWSAlgorithm;
@@ -146,6 +148,27 @@ class AccountControllerIntegrationTest {
     return headers;
   }
 
+  private static String serviceToken(String clientId) throws Exception {
+    JWTClaimsSet claims = new JWTClaimsSet.Builder()
+        .subject(clientId)
+        .issuer(ISSUER)
+        .audience(AUDIENCE)
+        .claim("roles", List.of("internal-service"))
+        .expirationTime(Date.from(java.time.Instant.now().plusSeconds(300)))
+        .build();
+    SignedJWT jwt = new SignedJWT(
+        new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(signingKey.getKeyID()).build(), claims);
+    jwt.sign(new RSASSASigner(signingKey));
+    return jwt.serialize();
+  }
+
+  private HttpHeaders serviceHeadersFor(String clientId) throws Exception {
+    HttpHeaders headers = new HttpHeaders();
+    headers.setBearerAuth(serviceToken(clientId));
+    headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+    return headers;
+  }
+
   @Test
   void createAccountReturnsAZeroBalanceAccountOwnedByTheCaller() throws Exception {
     ResponseEntity<AccountView> response = restTemplate.exchange(
@@ -234,7 +257,7 @@ class AccountControllerIntegrationTest {
     });
 
     // Balance is NOT updated synchronously — only the Kafka projection does
-    // that (other-docs/12), and no real broker is running in this test.
+    // that, and no real broker is running in this test.
     ResponseEntity<AccountView> afterDeposit = restTemplate.exchange(
         "/v1/accounts/" + accountId, HttpMethod.GET, new HttpEntity<>(null, headersFor("user-5")),
         AccountView.class);
@@ -267,5 +290,63 @@ class AccountControllerIntegrationTest {
         new HttpEntity<>(new CreateAccountRequest("SGD"), headers), String.class);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+  }
+
+  @Test
+  void resolveTransferReturnsBothAccountIdsForAServiceCaller() throws Exception {
+    ResponseEntity<AccountView> sender = restTemplate.exchange(
+        "/v1/accounts", HttpMethod.POST,
+        new HttpEntity<>(new CreateAccountRequest("SGD"), headersFor("user-10")),
+        AccountView.class);
+    ResponseEntity<AccountView> recipient = restTemplate.exchange(
+        "/v1/accounts", HttpMethod.POST,
+        new HttpEntity<>(new CreateAccountRequest("USD"), headersFor("recipient-1")),
+        AccountView.class);
+
+    ResponseEntity<ResolvedTransferAccountsView> response = restTemplate.exchange(
+        "/internal/accounts/resolve-transfer", HttpMethod.POST,
+        new HttpEntity<>(new ResolveTransferRequest("user-10", "SGD", "recipient-1", "USD"),
+            serviceHeadersFor("transaction-service")),
+        ResolvedTransferAccountsView.class);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(response.getBody().senderAccountId()).isEqualTo(sender.getBody().id());
+    assertThat(response.getBody().recipientAccountId()).isEqualTo(recipient.getBody().id());
+  }
+
+  @Test
+  void resolveTransferIs404WhenTheSenderHasNoAccountInThatCurrency() throws Exception {
+    ResponseEntity<String> response = restTemplate.exchange(
+        "/internal/accounts/resolve-transfer", HttpMethod.POST,
+        new HttpEntity<>(new ResolveTransferRequest("nobody", "JPY", "recipient-1", "USD"),
+            serviceHeadersFor("transaction-service")),
+        String.class);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+  }
+
+  @Test
+  void resolveTransferIs404WhenTheRecipientHasNoAccountInThatCurrency() throws Exception {
+    restTemplate.exchange("/v1/accounts", HttpMethod.POST,
+        new HttpEntity<>(new CreateAccountRequest("SGD"), headersFor("user-13")), AccountView.class);
+
+    ResponseEntity<String> response = restTemplate.exchange(
+        "/internal/accounts/resolve-transfer", HttpMethod.POST,
+        new HttpEntity<>(new ResolveTransferRequest("user-13", "SGD", "nobody", "JPY"),
+            serviceHeadersFor("transaction-service")),
+        String.class);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+  }
+
+  @Test
+  void resolveTransferRejectsAnOrdinaryEndUserToken() throws Exception {
+    ResponseEntity<String> response = restTemplate.exchange(
+        "/internal/accounts/resolve-transfer", HttpMethod.POST,
+        new HttpEntity<>(new ResolveTransferRequest("user-10", "SGD", "recipient-1", "USD"),
+            headersFor("user-1")),
+        String.class);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
   }
 }

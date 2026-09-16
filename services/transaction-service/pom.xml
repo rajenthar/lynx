@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.lynx</groupId>
+    <artifactId>lynx-parent</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>transaction-service</artifactId>
+  <packaging>jar</packaging>
+
+  <name>transaction-service</name>
+  <description>The real client-facing entry point for a transfer (other-docs/13) — translates an end user's own request into saga-orchestrator's internal API, resolving the recipient's account via account-service; owns no database of its own</description>
+
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.lynx</groupId>
+      <artifactId>lynx-common</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>com.lynx</groupId>
+      <artifactId>lynx-security</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>com.lynx</groupId>
+      <artifactId>lynx-idempotency</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>com.lynx</groupId>
+      <artifactId>lynx-telemetry</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Guards the two downstream calls (saga-orchestrator, account-service)
+         — same shape as saga-orchestrator's own AbstractServiceClient
+         (other-docs/10 Decision 8), copied rather than shared as a
+         library. -->
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-circuitbreaker</artifactId>
+      <version>2.2.0</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-otlp</artifactId>
+    </dependency>
+
+    <!-- No JPA/Flyway/Postgres/Kafka — this service owns no database
+         (other-docs/13): every durable fact already lives in
+         saga-orchestrator's saga_state or ledger-service's ledger. -->
+
+    <dependency>
+      <groupId>org.apache.httpcomponents.client5</groupId>
+      <artifactId>httpclient5</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -11,8 +11,8 @@ import org.springframework.context.annotation.Import;
 /**
  * Registers the filter chain in order: correlation id first (so even a
  * rejected/unauthenticated request is traceable), then JWT verification.
- * Activates the shared {@link GlobalExceptionHandler} explicitly, per
- * other-docs/01's deferred-introduction design.
+ * Activates the shared {@link GlobalExceptionHandler} explicitly —
+ * a deliberate, deferred introduction rather than auto-scanning.
  */
 @Configuration
 @Import(GlobalExceptionHandler.class)

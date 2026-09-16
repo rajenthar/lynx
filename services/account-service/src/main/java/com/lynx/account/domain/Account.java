@@ -9,9 +9,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * One account = one user = one currency (other-docs/12 — deliberately no
- * multi-currency accounts; a user wanting both SGD and USD creates two
- * rows). {@code available}/{@code held} live directly on this row, not a
+ * One account = one user = one currency. {@code available}/{@code held} live directly on this row, not a
  * separate table — the two numbers only ever change together with this
  * row's own identity, no relationship worth normalizing out.
  *

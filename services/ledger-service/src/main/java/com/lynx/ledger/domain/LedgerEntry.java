@@ -24,8 +24,8 @@ import java.util.UUID;
  * javadoc for why it doesn't belong here.
  *
  * <p>{@code userId} replaces what was, earlier in this project, a
- * client-supplied {@code idempotencyKey} column — see other-docs/08 Decision 29 for the full
- * reasoning. In short: ADR-003's rate-lock expiry policy (release, never
+ * client-supplied {@code idempotencyKey} column, since removed:
+ * ADR-003's rate-lock expiry policy (release, never
  * re-lock the same saga) means each phase now happens AT MOST ONCE per saga,
  * forever, so {@code UNIQUE(user_id, saga_id, entry_type)} is sufficient on
  * its own — any repeat call for that exact combination is correctly a

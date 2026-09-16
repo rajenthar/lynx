@@ -10,7 +10,7 @@ import java.util.UUID;
 
 /**
  * This instance's RSA signing key, generated fresh at startup
- * (other-docs/11 Decision 4) — never persisted, never leaves this process.
+ * — never persisted, never leaves this process.
  * The public half is published at {@code GET /auth/.well-known/jwks.json}
  * (see {@code JwksController}); the private half signs every token
  * {@link com.lynx.auth.service.JwtIssuer} mints.

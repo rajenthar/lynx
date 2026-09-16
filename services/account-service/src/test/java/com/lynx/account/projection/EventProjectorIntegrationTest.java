@@ -29,9 +29,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Real Postgres via Testcontainers — the actually novel logic (decode →
  * apply → idempotent record via {@code processed_events}) this whole
  * projection depends on, proven directly against {@link
- * EventProjector#apply}, not through a real Kafka broker (see
- * other-docs/12's test-boundary decision, and {@link
- * OutboxEventConsumer}'s own javadoc).
+ * EventProjector#apply}, not through a real Kafka broker (a deliberate
+ * test-boundary decision — see {@link OutboxEventConsumer}'s own javadoc).
  */
 @Testcontainers
 @SpringBootTest
@@ -77,7 +76,7 @@ class EventProjectorIntegrationTest {
   void setUp() {
     accountId = UUID.randomUUID();
     otherAccountId = UUID.randomUUID();
-    // Fresh, per-test userId — other-docs/12's later UNIQUE(user_id,
+    // Fresh, per-test userId — the later UNIQUE(user_id,
     // currency) constraint means a fixed "user-1"/"SGD" pair would only
     // ever insert successfully in the FIRST test method to run in this
     // class (same Postgres container reused across all @Test methods,
@@ -169,7 +168,7 @@ class EventProjectorIntegrationTest {
   }
 
   /**
-   * The actual property other-docs/12 Decision 7 fixes: a Kafka topic with
+   * The actual property the "Idempotent Consumer" pattern fixes: a Kafka topic with
    * multiple partitions gives NO guarantee that a lower eventId is
    * delivered before a higher one — only within one partition. A
    * high-water-mark ("skip if eventId &lt;= last seen") would have WRONGLY

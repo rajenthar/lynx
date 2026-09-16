@@ -15,7 +15,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 /**
- * Calls {@code ledger-service}'s deposit endpoint (other-docs/12) — this
+ * Calls {@code ledger-service}'s deposit endpoint — this
  * service's own identity, ADR-007 Option C, same shape {@code
  * saga-orchestrator}'s downstream clients use: a resilience4j {@link
  * CircuitBreaker} guarding the call, {@link ServiceTokenProvider} for the
@@ -43,7 +43,7 @@ public class LedgerServiceClient {
   }
 
   /**
-   * @param depositId this deposit's own write-identity (other-docs/12) — a
+   * @param depositId this deposit's own write-identity — a
    *     fresh UUID per call; retried automatically by nothing today (no
    *     saga wraps this), so a caller that wants at-most-once on ITS OWN
    *     retry must reuse the same {@code depositId}.

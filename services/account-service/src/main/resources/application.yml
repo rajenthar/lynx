@@ -30,13 +30,13 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     listener:
-      # other-docs/12 Decision 7: commit each record's offset only after
+      # Commit each record's offset only after
       # OutboxEventConsumer.onMessage calls ack.acknowledge() itself, which
       # only happens after EventProjector.apply() returns successfully.
       ack-mode: manual_immediate
     producer:
       # Only ever used for BeansConfig's DeadLetterPublishingRecoverer
-      # (other-docs/12 Decision 8) — this service publishes nothing else.
+      # — this service publishes nothing else.
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
@@ -66,7 +66,7 @@ lynx:
     audience: lynx-api
   # ADR-007: this service's OWN identity when calling ledger-service's
   # deposit endpoint. Seeded into auth-service's service_clients table at
-  # ITS startup — see other-docs/12 and auth-service's ServiceClientSeeder.
+  # ITS startup — see auth-service's ServiceClientSeeder.
   service-token:
     token-endpoint: http://localhost:8080/auth/token
     client-id: account-service

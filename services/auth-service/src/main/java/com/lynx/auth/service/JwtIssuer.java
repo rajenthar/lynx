@@ -14,8 +14,8 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * Signs the two token shapes this service issues — see other-docs/11's
- * claims table. Both are RS256, both carry the same {@code iss}/{@code aud}
+ * Signs the two token shapes this service issues.
+ * Both are RS256, both carry the same {@code iss}/{@code aud}
  * every {@code JwtVerifier} in the system already expects
  * ({@code https://auth.lynx} / {@code lynx-api}) — only {@code sub},
  * whether {@code email} is present, {@code roles}, and the lifetime differ.
@@ -25,10 +25,10 @@ public class JwtIssuer {
   static final String ISSUER = "https://auth.lynx";
   static final String AUDIENCE = "lynx-api";
 
-  /** 30 minutes — an end-user session token (other-docs/11 Decision 2: access-token-only, no refresh). */
+  /** 30 minutes — an end-user session token. */
   static final Duration USER_TOKEN_TTL = Duration.ofMinutes(30);
 
-  /** 1 hour — matches {@code ServiceTokenProvider}'s 50-minute reuse window with a 10-minute buffer (other-docs/03 Decision 8). */
+  /** 1 hour — matches {@code ServiceTokenProvider}'s 50-minute reuse window with a 10-minute buffer. */
   static final Duration SERVICE_TOKEN_TTL = Duration.ofHours(1);
 
   private final SigningKey signingKey;

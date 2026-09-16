@@ -13,7 +13,7 @@ import java.util.UUID;
 /**
  * A materialized running balance for one (account, currency) pair — see
  * the {@code account_balances} table's own migration comment for the full
- * rationale (other-docs/12 Decision 4). Mutated ONLY through {@link
+ * rationale. Mutated ONLY through {@link
  * com.lynx.ledger.repository.AccountBalanceRepository}'s two native,
  * single-statement operations — never loaded, mutated in Java, and saved
  * back the ordinary JPA way, since the whole point is one atomic

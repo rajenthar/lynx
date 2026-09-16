@@ -20,9 +20,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Ordinary end-user auth only (no ADR-007 on-behalf-of shape here) — this
- * service has no internal-service caller today; every request is a real,
- * live end user's own JWT, scoped to their own accounts.
+ * Ordinary end-user auth only — every endpoint here is a real, live end
+ * user's own JWT, scoped to their own accounts. {@code transaction-service}
+ * never calls this controller at all: it resolves both accounts it needs
+ * for a transfer through {@code InternalAccountController}'s single
+ * combined lookup instead, entirely separately from this end-user surface.
  */
 @RestController
 @RequestMapping("/v1/accounts")

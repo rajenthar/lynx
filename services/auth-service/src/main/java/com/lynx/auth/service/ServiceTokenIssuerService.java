@@ -8,8 +8,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 /**
  * The server side of the OAuth2 Client Credentials grant (RFC 6749 §4.4)
- * {@code ServiceTokenProvider} already speaks (other-docs/03 Decision 8;
- * other-docs/11 Decision 3). Looks up the caller by {@code client_id},
+ * {@code ServiceTokenProvider} already speaks. Looks up the caller by {@code client_id},
  * checks its BCrypt-hashed secret, and mints a token carrying that client's
  * registered roles (e.g. {@code internal-service}).
  */

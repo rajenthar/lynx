@@ -27,9 +27,10 @@ be re-derived from scratch.
 | `ledger-service` | Built, tested (30 tests) — HOLD/LOCK/SETTLE/RELEASE/DEPOSIT + saga audit trail + per-account history + locked-rate read, real Postgres via Testcontainers; HOLD checks balance via a materialized `account_balances` running total (TigerBeetle/Modern Treasury pattern, other-docs/12 Decision 4); `applyBalanceDeltas` locks accounts in a deterministic global order to close a real HOLD/RELEASE deadlock (other-docs/08 Decision 32) | [other-docs/08](other-docs/08-ledger-service-design-decisions.md) |
 | `fx-rate-service` | Built, tested (14 tests) — idempotent FX execution + rate quoting (with TTL), both behind mock providers; no real caller or real provider yet | [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) |
 | `auth-service` | Built, tested (17 tests) — real Postgres-backed register/login (BCrypt), OAuth2 Client Credentials service-token issuance (ADR-007), publishes the JWKS every `JwtVerifier` already expects; RSA key generated fresh in-memory per boot | [other-docs/11](other-docs/11-auth-service-design-decisions.md) |
-| `saga-orchestrator` | Built, tested (25 tests) — HOLD → QUOTE+LOCK → EXECUTE → SETTLE polling loop, `FOR UPDATE SKIP LOCKED` proven against real Postgres, `ServiceTokenProvider`'s first real caller; recovery worker; `saga_state` scoped by `(user_id, saga_id)` not `saga_id` alone; each downstream client has its own resilience4j `CircuitBreaker`, a separate named instance from `ServiceTokenProvider`'s own (now also resilience4j — `lynx-security`'s hand-rolled `CircuitBreaker` was deleted entirely); `transaction-service` (not built) is its only intended caller | [other-docs/10](other-docs/10-saga-orchestrator-plan.md) |
-| `account-service` | Built, tested (38 tests) — account creation/funding (one account per user/currency, `UNIQUE` constraint), the first real consumer of ADR-002's CDC pipeline (a genuine Debezium connector on `ledger-service`'s outbox → Redpanda → `@KafkaListener`, keyed by `saga_id`, manual per-record offset commit), CQRS balance projection (ADR-005) idempotent via the "Idempotent Consumer" pattern (order-independent, safe across multiple Kafka partitions), a real dead-letter queue (bounded retry, then a `.DLT` topic — no message silently dropped) | [other-docs/12](other-docs/12-account-service-design-decisions.md) |
-| everything else in `services/*` (12 more placeholder dirs) | Not started | — |
+| `saga-orchestrator` | Built, tested (25 tests) — HOLD → QUOTE+LOCK → EXECUTE → SETTLE polling loop, `FOR UPDATE SKIP LOCKED` proven against real Postgres, `ServiceTokenProvider`'s first real caller; recovery worker; `saga_state` scoped by `(user_id, saga_id)` not `saga_id` alone; each downstream client has its own resilience4j `CircuitBreaker`, a separate named instance from `ServiceTokenProvider`'s own (now also resilience4j — `lynx-security`'s hand-rolled `CircuitBreaker` was deleted entirely); `transaction-service` (other-docs/13, now built) is its only real caller | [other-docs/10](other-docs/10-saga-orchestrator-plan.md) |
+| `account-service` | Built, tested (45 tests) — account creation/funding (one account per user/currency, `UNIQUE` constraint), the first real consumer of ADR-002's CDC pipeline (a genuine Debezium connector on `ledger-service`'s outbox → Redpanda → `@KafkaListener`, keyed by `saga_id`, manual per-record offset commit), CQRS balance projection (ADR-005) idempotent via the "Idempotent Consumer" pattern (order-independent, safe across multiple Kafka partitions), a real dead-letter queue (bounded retry, then a `.DLT` topic — no message silently dropped); a single combined internal-only `POST /internal/accounts/resolve-transfer` endpoint (other-docs/13 Decisions 2c/8 — POST with a body, not GET with query params, to keep both user ids out of the URL/logs) resolves both a transfer's sender and recipient account ids in one call, guarded by a custom `@RequiresInternalService` annotation + Spring AOP aspect rather than Spring Security (other-docs/13 Decision 7) — `GET /v1/accounts` (list) stays plain, end-user-only | [other-docs/12](other-docs/12-account-service-design-decisions.md) |
+| `transaction-service` | Built, tested (12 tests) — the real client-facing entry point for a transfer (other-docs/13): end-user JWT only, derives `sagaId` deterministically from `(userId, Idempotency-Key)` (ADR-004's real chain, its first actual caller), resolves both accounts in one combined call to `account-service` (own service-identity token, other-docs/13 Decision 2c) then calls `saga-orchestrator`'s internal API; owns no database of its own | [other-docs/13](other-docs/13-transaction-service-design-decisions.md) |
+| everything else in `services/*` (11 more placeholder dirs) | Not started | — |
 
 ---
 
@@ -153,10 +154,10 @@ INSERT ledger + INSERT outbox   (same ACID transaction — both or neither)
 
 **Scope note (updated — see other-docs/08's migration-numbering note; `ledger-service` isn't deployed yet, so this schema change is folded into its single `V1` migration, not a separate `V7`):** the chain below describes the
 *original* client-facing pattern — where a real end-user's
-`Idempotency-Key` deterministically derives `saga_id` — and it still
-applies exactly as written to the future, not-yet-built
-`transaction-service`'s saga-creation endpoint, the one place a client
-ever actually mints an `Idempotency-Key`. `ledger-service` itself no
+`Idempotency-Key` deterministically derives `saga_id` — and it applies
+exactly as written to `transaction-service`'s `POST /v1/transfers`
+(other-docs/13, now built), the one place a client ever actually mints an
+`Idempotency-Key`. `ledger-service` itself no
 longer has a client-supplied `Idempotency-Key` at all: since ADR-003's
 rate-lock expiry policy means every phase (`hold`/`lock`/`settle`/
 `release`) happens at most once per saga, forever, `ledger`'s and
@@ -166,7 +167,7 @@ phase)` is `ledger-service`'s whole write identity now. See
 [other-docs/08](other-docs/08-ledger-service-design-decisions.md)
 Decision 29.
 
-**The chain (as `transaction-service`'s saga-creation endpoint will use it):**
+**The chain (as `transaction-service`'s saga-creation endpoint now actually uses it — `SagaIds.deriveSagaId`):**
 ```
 Client generates Idempotency-Key (UUID v4, stored client-side, REUSED on retry)
         ↓
@@ -304,4 +305,4 @@ writeup.
 | No auth wiring on `fx-rate-service` yet (deliberate — no real caller to authenticate) | `fx-rate-service` | [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) Decision 4 |
 | `fx_executions` has `UNIQUE(execution_id)` alone, no `user_id` column — same saga_id-collision-blast-radius gap `ledger`/`fx_rate_locks` had before their own `user_id` fixes (other-docs/08 Decisions 29/31), plus `GET /v1/fx/executions/{id}` and `recoverFromDb` are both unscoped by caller. Blocked on `fx-rate-service` having no real `userId` concept yet (`SYSTEM_CALLER` placeholder) — found while building `saga-orchestrator`, whose derived `executionId` inherits this from `fx_executions` itself, not introduced by `saga-orchestrator` | `fx-rate-service` (needs real auth first) | [other-docs/10](other-docs/10-saga-orchestrator-design-decisions.md) Decision 6 |
 | ~~No `expires_at`/TTL on the locked rate~~ **RESOLVED** — `fx-rate-service`'s `GET /v1/fx/quotes` issues it, `FxRateLock.expiresAt` stores it. Enforcement POLICY (release-only, no relock — ADR-003) is now BUILT: `saga-orchestrator`'s `executeTrade` checks `rateExpiresAt` and releases+fails rather than executing against an expired lock | `saga-orchestrator` (built) | [ADR-003](ADR-003-saga-orchestrator.md)'s rate-lock expiry section, [other-docs/08](other-docs/08-ledger-service-design-decisions.md) Decision 24, [other-docs/09](other-docs/09-fx-rate-service-design-decisions.md) Decision 6, [other-docs/10](other-docs/10-saga-orchestrator-plan.md) |
-| Retry-as-new-saga (who decides, and how) for a saga that failed on an expired lock — deferred, not designed | `transaction-service` (not yet built) | [ADR-003](ADR-003-saga-orchestrator.md)'s rate-lock expiry section, [other-docs/10](other-docs/10-saga-orchestrator-plan.md)'s Deferred list |
+| Retry-as-new-saga (who decides, and how) for a saga that failed on an expired lock — still deferred: a client retries by sending a brand-new `POST /v1/transfers` with a NEW `Idempotency-Key` (other-docs/13); nothing automatic exists | `transaction-service` (built, other-docs/13 — this specific behavior still not automated) | [ADR-003](ADR-003-saga-orchestrator.md)'s rate-lock expiry section, [other-docs/10](other-docs/10-saga-orchestrator-plan.md)'s Deferred list |

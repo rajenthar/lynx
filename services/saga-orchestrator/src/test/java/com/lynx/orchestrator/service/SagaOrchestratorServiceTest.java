@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Mocked repository + clients, no Postgres: proves the state machine's
  * transitions, the deterministic executionId's stability across redos, the
- * transient-vs-business-failure split (other-docs/10's confirmed decision),
+ * transient-vs-business-failure split,
  * and settle crediting from filledRate rather than the original quote.
  */
 class SagaOrchestratorServiceTest {
@@ -201,7 +201,7 @@ class SagaOrchestratorServiceTest {
 
   @Test
   void findOrThrowThrowsNotFoundWhenTheSagaBelongsToADifferentUser() {
-    // other-docs/10 Decision 7: same 404, indistinguishable from a saga
+    // Same 404, indistinguishable from a saga
     // that never existed — this endpoint can't be used to probe for other
     // users' saga ids.
     UUID sagaId = UUID.randomUUID();

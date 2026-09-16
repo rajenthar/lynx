@@ -62,6 +62,17 @@
       <artifactId>spring-boot-starter-data-jpa</artifactId>
     </dependency>
 
+    <!-- Backs @RequiresInternalService (other-docs/13) — a declarative
+         alternative to a manual if-check, deliberately NOT Spring
+         Security's @PreAuthorize: no other service in this project uses
+         Spring Security, and adopting it here alone would introduce a
+         real new framework dependency plus a SecurityContextHolder
+         bridge just to replace a two-line role check. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-aop</artifactId>
+    </dependency>
+
     <!-- The consuming side of ADR-002's CDC pipeline — Debezium's Postgres
          connector produces Debezium's own flat CDC JSON onto
          lynx.public.outbox (registered against ledger-service's outbox

@@ -193,4 +193,40 @@ class AccountServiceTest {
     assertThatThrownBy(() -> accountService.deposit(accountId, "user-1", amount))
         .isInstanceOf(ValidationException.class);
   }
+
+  @Test
+  void resolveTransferAccountsReturnsBothIdsInOneCall() {
+    UUID senderAccountId = UUID.randomUUID();
+    UUID recipientAccountId = UUID.randomUUID();
+    when(accountRepository.findByUserIdAndCurrency("user-1", "SGD"))
+        .thenReturn(Optional.of(new Account(senderAccountId, "user-1", "SGD", Instant.now())));
+    when(accountRepository.findByUserIdAndCurrency("recipient-1", "USD"))
+        .thenReturn(Optional.of(new Account(recipientAccountId, "recipient-1", "USD", Instant.now())));
+
+    AccountService.ResolvedTransferAccounts resolved =
+        accountService.resolveTransferAccounts("user-1", "SGD", "recipient-1", "USD");
+
+    assertThat(resolved.senderAccountId()).isEqualTo(senderAccountId);
+    assertThat(resolved.recipientAccountId()).isEqualTo(recipientAccountId);
+  }
+
+  @Test
+  void resolveTransferAccountsIs404WhenTheSenderHasNoAccountInThatCurrency() {
+    when(accountRepository.findByUserIdAndCurrency("user-1", "SGD")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> accountService.resolveTransferAccounts("user-1", "SGD", "recipient-1", "USD"))
+        .isInstanceOf(NotFoundException.class)
+        .hasMessageContaining("userId=user-1");
+  }
+
+  @Test
+  void resolveTransferAccountsIs404WhenTheRecipientHasNoAccountInThatCurrency() {
+    when(accountRepository.findByUserIdAndCurrency("user-1", "SGD"))
+        .thenReturn(Optional.of(new Account(UUID.randomUUID(), "user-1", "SGD", Instant.now())));
+    when(accountRepository.findByUserIdAndCurrency("recipient-1", "USD")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> accountService.resolveTransferAccounts("user-1", "SGD", "recipient-1", "USD"))
+        .isInstanceOf(NotFoundException.class)
+        .hasMessageContaining("Recipient");
+  }
 }

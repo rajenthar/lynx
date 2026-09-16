@@ -87,7 +87,7 @@ public class LedgerServiceClient extends AbstractServiceClient {
    * {@code accountId} is the ORIGINAL sender's account — {@code
    * ledger-service} figures out internally which system pool
    * ({@code HOLD_POOL} vs {@code FX_LOCK}) to reverse from, based on this
-   * saga's own ledger history (other-docs/08 Decision 20); the caller
+   * saga's own ledger history; the caller
    * never needs to track that itself.
    */
   public void release(UUID sagaId, String userId, UUID accountId, BigDecimal amount,

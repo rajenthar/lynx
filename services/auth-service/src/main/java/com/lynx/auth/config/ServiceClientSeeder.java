@@ -14,11 +14,14 @@ import org.springframework.stereotype.Component;
  * Seeds every known internal caller's own service-client row on startup, if
  * missing — the exact {@code client-id}/{@code client-secret} each one's
  * own {@code application.yml} already hard-codes, so local end-to-end
- * wiring works without a manual seeding step once this service exists
- * (other-docs/11 Decision 3). {@code account-service} (other-docs/12) is
- * the second entry here, alongside {@code saga-orchestrator}
- * (other-docs/10) — both call {@code ledger-service} with their own
- * service identity, ADR-007 Option C.
+ * wiring works without a manual seeding step once this service exists.
+ * {@code account-service} and
+ * {@code transaction-service} are seeded alongside {@code
+ * saga-orchestrator} — each calls a downstream service
+ * with its own service identity, ADR-007 Option C: {@code account-service}
+ * and {@code saga-orchestrator} call {@code ledger-service};
+ * {@code transaction-service} calls {@code saga-orchestrator} and {@code
+ * account-service}'s recipient-resolution endpoint.
  *
  * <p>Done here rather than as SQL in the {@code V1} migration — a BCrypt
  * hash is salted and non-deterministic, so there's no single hash value to
@@ -37,7 +40,8 @@ public class ServiceClientSeeder implements CommandLineRunner {
 
   private static final List<SeedClient> SEED_CLIENTS = List.of(
       new SeedClient("saga-orchestrator", "placeholder-not-a-real-secret", new String[] {"internal-service"}),
-      new SeedClient("account-service", "placeholder-not-a-real-secret", new String[] {"internal-service"}));
+      new SeedClient("account-service", "placeholder-not-a-real-secret", new String[] {"internal-service"}),
+      new SeedClient("transaction-service", "placeholder-not-a-real-secret", new String[] {"internal-service"}));
 
   private final ServiceClientRepository serviceClientRepository;
   private final BCryptPasswordEncoder passwordEncoder;

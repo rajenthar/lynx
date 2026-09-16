@@ -39,7 +39,7 @@ logging:
 
 lynx:
   security:
-    # auth-service now exists (other-docs/11) and answers exactly this URL
+    # auth-service now exists and answers exactly this URL
     # when run locally on port 8080. Tests still wire an in-memory JWKS
     # directly rather than hitting it over HTTP.
     jwks-url: http://localhost:8080/auth/.well-known/jwks.json
@@ -47,8 +47,8 @@ lynx:
     audience: lynx-api
   # ADR-007: this service's OWN identity when calling ledger-service/
   # fx-rate-service. This exact client-id/client-secret pair is seeded into
-  # auth-service's service_clients table at ITS startup (ServiceClientSeeder,
-  # other-docs/11 Decision 1) — running both services locally, this actually
+  # auth-service's service_clients table at ITS startup (ServiceClientSeeder)
+  # — running both services locally, this actually
   # works end to end now. Tests still mock ServiceTokenProvider's HttpClient
   # directly (see ServiceTokenProviderTest's own pattern), never hit this
   # URL for real.

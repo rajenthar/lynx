@@ -24,7 +24,7 @@ import org.springframework.web.client.RestClient;
  * every OTHER service identically, there's no reason for two.
  *
  * <p>Each downstream client also gets its OWN resilience4j {@link
- * CircuitBreaker} instance (other-docs/10 Decision 8) — deliberately NOT
+ * CircuitBreaker} instance — deliberately NOT
  * the same breaker {@link ServiceTokenProvider} uses internally for its
  * own token fetch (a separate, independently-named resilience4j breaker
  * inside that class — see its own javadoc; {@code lynx-security} used to

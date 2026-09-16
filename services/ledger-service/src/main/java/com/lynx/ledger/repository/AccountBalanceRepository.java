@@ -10,7 +10,7 @@ import org.springframework.data.repository.query.Param;
 
 /**
  * Two atomic, single-statement operations — the whole mechanism behind
- * other-docs/12 Decision 4's fix. Nothing here ever reads a balance and
+ * a materialized running balance. Nothing here ever reads a balance and
  * then separately decides in Java; the SQL statement itself IS the
  * decision, so there's no window for a concurrent writer to interleave.
  */
@@ -34,8 +34,7 @@ public interface AccountBalanceRepository extends JpaRepository<AccountBalance, 
       @Param("accountId") UUID accountId, @Param("currency") String currency, @Param("delta") BigDecimal delta);
 
   /**
-   * The guarded debit — other-docs/08 Decision 23 / other-docs/12
-   * Decision 4. One conditional {@code UPDATE}: the {@code WHERE balance
+   * The guarded debit. One conditional {@code UPDATE}: the {@code WHERE balance
    * >= :amount} clause IS the insufficient-funds check, evaluated
    * atomically against whatever the row's current value is at the moment
    * this statement acquires its row lock — not a value read moments

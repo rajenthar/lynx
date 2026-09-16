@@ -20,7 +20,7 @@ import java.util.UUID;
  * exactly what it's documented as (one row = one leg, append-only).
  *
  * <p>{@code userId} replaces what was, earlier in this project, briefly
- * {@code idempotencyKey} — see other-docs/08 Decision 29.
+ * a client-supplied {@code idempotencyKey}, since removed:
  * ADR-003's rate-lock expiry policy (release, never re-lock the same
  * saga) means {@code lock} now happens AT MOST ONCE per saga, forever, so
  * {@code UNIQUE(user_id, saga_id)} is sufficient on its own — the caller's

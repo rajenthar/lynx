@@ -1,6 +1,6 @@
--- other-docs/11: auth-service's own tables. Single V1 file — this service
+-- auth-service's own tables. Single V1 file — this service
 -- isn't deployed yet, so there's no released schema to migrate incrementally
--- from (see other-docs/08's migration-numbering note).
+-- from.
 
 CREATE TABLE users (
     id UUID PRIMARY KEY,
@@ -12,7 +12,7 @@ CREATE TABLE users (
 );
 
 -- Who may request a service-identity token via the Client Credentials grant
--- (ADR-007 Option C; other-docs/11 Decision 3). The secret is stored only as
+-- (ADR-007 Option C). The secret is stored only as
 -- a BCrypt hash, same as users.password_hash above — never in plaintext.
 -- The one known caller today (saga-orchestrator) is seeded at application
 -- startup instead of here, since a BCrypt hash is salted/non-deterministic

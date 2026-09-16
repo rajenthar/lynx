@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * A direct, non-saga deposit (other-docs/12) — deliberately its own
+ * A direct, non-saga deposit — deliberately its own
  * controller/resource ({@code /v1/ledger/deposits/{depositId}}), not nested
  * under {@code LedgerController}'s {@code /v1/ledger/sagas/{sagaId}}: a
  * deposit isn't a saga phase and has no {@code sagaId}. {@code depositId}

@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The per-account audit trail (other-docs/12) — real ledger/fintech
+ * The per-account audit trail — real ledger/fintech
  * infrastructure keeps this as an explicit, separate query from the fast
  * running balance rather than folding it in (TigerBeetle's {@code
  * get_account_transfers}; Modern Treasury's List Ledger Entries).

@@ -23,7 +23,7 @@ public class BeansConfig {
     return new JwtIssuer(signingKey);
   }
 
-  /** Same tool, same reasoning, for both user passwords and service-client secrets (other-docs/11 Decision 1/3). */
+  /** Same tool, same reasoning, for both user passwords and service-client secrets. */
   @Bean
   public BCryptPasswordEncoder passwordEncoder() {
     return new BCryptPasswordEncoder();

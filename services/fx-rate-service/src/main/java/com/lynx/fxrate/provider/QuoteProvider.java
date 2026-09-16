@@ -3,7 +3,7 @@ package com.lynx.fxrate.provider;
 import java.math.BigDecimal;
 
 /**
- * The quoting half of this service (see other-docs/09 Decision 6) —
+ * The quoting half of this service —
  * deliberately kept in the SAME service as {@link FxProvider}'s execution
  * half, not split into a separate quoting engine: at this project's
  * current scale (one mock provider, no real market-data feed, no

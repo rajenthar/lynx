@@ -52,8 +52,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * writing one transactional-outbox event per phase (ADR-002), all wrapped in
  * {@link IdempotencyGuard} (ADR-004).
  *
- * <p>No client-supplied {@code Idempotency-Key} (see other-docs/08 Decision
- * 29): ADR-003's rate-lock expiry policy (release,
+ * <p>No client-supplied {@code Idempotency-Key}: ADR-003's rate-lock expiry policy (release,
  * never re-lock the same saga) means each phase now happens AT MOST ONCE
  * per saga, forever — {@code (userId, sagaId, phase)} is a complete,
  * sufficient identity on its own. {@link IdempotencyGuard} still runs
@@ -95,10 +94,10 @@ public class LedgerService {
 
   /**
    * The account must actually be able to cover {@code amount} before the
-   * {@code HOLD_DR} leg is allowed to post (other-docs/08 Decision 23) —
+   * {@code HOLD_DR} leg is allowed to post —
    * enforced by {@link #insertLegsAndOutbox}'s per-leg balance application,
-   * NOT a separate read-then-decide step here. See other-docs/12 Decision
-   * 4 and {@link AccountBalanceRepository#debitIfSufficient} for why: the
+   * NOT a separate read-then-decide step here. See
+   * {@link AccountBalanceRepository#debitIfSufficient} for why: the
    * industry-standard pattern (TigerBeetle's running balance fields;
    * Modern Treasury's "post only if the resulting balance satisfies a
    * range") is one atomic conditional {@code UPDATE}, not a plain
@@ -115,7 +114,7 @@ public class LedgerService {
   }
 
   /**
-   * Not saga-driven (other-docs/12) — a direct, atomic double-entry credit
+   * Not saga-driven — a direct, atomic double-entry credit
    * from {@link SystemAccounts#FUNDING_SOURCE}. {@code depositId} plays
    * exactly the role {@code sagaId} plays for the four saga phases: a
    * caller-supplied UUID that IS the write identity, so a retried deposit
@@ -156,8 +155,7 @@ public class LedgerService {
    * debited/credited amounts on a later, separate request.
    *
    * <p>Scoped to {@code (sagaId, userId)}, not {@code sagaId} alone — same
-   * two reasons as everywhere else in this class (other-docs/08 Decision
-   * 30): a {@code saga_id} collision between two unrelated users must not
+   * two reasons as everywhere else in this class: a {@code saga_id} collision between two unrelated users must not
    * return the wrong one's locked rate, and a caller has no business
    * reading a rate for a saga that isn't theirs in the first place.
    *
@@ -201,10 +199,9 @@ public class LedgerService {
    * Which system account still holds this saga's money, determined from
    * what actually happened so far — NOT hardcoded to {@code HOLD_POOL}.
    * Scoped to {@code (sagaId, userId)}, not {@code sagaId} alone — same
-   * saga_id-collision defense as everywhere else in this class (other-docs/08
-   * Decision 29).
+   * saga_id-collision defense as everywhere else in this class.
    *
-   * <p>Fixes a real bug (other-docs/08 Decision 20): {@code lock} moves
+   * <p>Fixes a real bug: {@code lock} moves
    * money OUT of {@code HOLD_POOL} and INTO {@code FX_LOCK}
    * ({@code LOCK_DR(HOLD_POOL)}/{@code LOCK_CR(FX_LOCK)}). A
    * {@code release} that always reversed {@code HOLD_POOL} would, for a
@@ -235,7 +232,7 @@ public class LedgerService {
 
   /**
    * Scoped to {@code (sagaId, userId)}, not {@code sagaId} alone — this
-   * was a real gap (other-docs/08 Decision 31): on a {@code saga_id}
+   * was a real gap: on a {@code saga_id}
    * collision between two unrelated users, an unscoped query would have
    * returned BOTH users' legs mixed into one response — actual cross-user
    * financial data in a live API response, not just an internal-tooling
@@ -252,14 +249,14 @@ public class LedgerService {
   }
 
   /**
-   * Everything that has ever happened to one account (other-docs/12) —
+   * Everything that has ever happened to one account —
    * deposits, holds, settles, releases, spanning every saga/deposit that
    * ever touched it, newest first. Unlike {@link #auditTrail}, NOT scoped
    * by {@code userId}: a ledger row's own {@code userId} is who initiated
    * THAT operation (e.g. the sender for a {@code SETTLE_CR} row crediting
    * the RECIPIENT's account), not who owns the account being queried —
    * {@code ledger-service} has no notion of account ownership at all
-   * (that's {@code account-service}'s data, other-docs/12). Callers that
+   * (that's {@code account-service}'s data). Callers that
    * need "is this actually the caller's own account" enforced must check
    * that themselves before calling this — this endpoint trusts its caller
    * the same way every {@code ledger-service} write already does.
@@ -285,7 +282,7 @@ public class LedgerService {
                                           List<LedgerEntry> legs, DomainEvent event,
                                           Runnable withinTransaction) {
     // sagaId itself is the idempotency key now — deterministic, not
-    // client-supplied (see class javadoc / other-docs/08 Decision 29).
+    // client-supplied (see class javadoc).
     IdempotencyKey derivedKey = IdempotencyKey.derivedFrom(sagaId.toString());
     log.debug("Entering {} for saga {}, userId={}", phase, sagaId, userId);
     return idempotencyGuard.execute(
@@ -343,7 +340,7 @@ public class LedgerService {
       // TWO different account_balances rows in opposite orders (e.g. two
       // different transfers both touching the same pair of accounts) —
       // Postgres detects and kills one participant. Rare, but possible
-      // with row-level locking (other-docs/12 Decision 4) whenever a
+      // with row-level locking whenever a
       // single write touches more than one account row. NOTHING was
       // persisted — safe to retry, same reasoning as the UNIQUE-constraint
       // case above being a genuine duplicate rather than a real failure.
@@ -360,7 +357,7 @@ public class LedgerService {
 
   /**
    * Applies every leg's balance delta to {@code account_balances}
-   * (other-docs/12 Decision 4) — the materialized running balance this
+   * — the materialized running balance this
    * whole mechanism replaced a {@code SUM(...)}-over-history check with.
    * Every {@code *_CR} leg credits (positive delta), every {@code *_DR}
    * leg debits (negative delta) — same convention {@link #assertBalanced}
@@ -370,7 +367,7 @@ public class LedgerService {
    * (including every credit, and every debit from a system account, which
    * is allowed to run negative) is unconditional.
    *
-   * <p><b>Lock ordering (other-docs/12 Decision 9):</b> sorted by {@code
+   * <p><b>Lock ordering:</b> sorted by {@code
    * accountId} before applying, NOT in each phase's own construction order
    * (e.g. {@code hold()} builds {@code [realAccount, HOLD_POOL]}, {@code
    * release()} builds {@code [sourcePool, realAccount]} — reversed). Two
@@ -414,7 +411,7 @@ public class LedgerService {
    * entry_type)} is the whole constraint, a single
    * saga's rows span every phase it's ever gone through — this filter
    * picks out just the phase being recovered, same reasoning as before
-   * the {@code userId} rename (other-docs/08 Decision 28), just filtering by
+   * the {@code userId} rename, just filtering by
    * {@code userId} now instead of a per-attempt key.
    */
   Optional<LedgerPhaseResponse> recoverFromDb(UUID sagaId, String userId, SagaPhase phase) {
