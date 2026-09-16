@@ -24,11 +24,11 @@ import org.springframework.web.client.ResourceAccessException;
  * two shapes {@code SagaOrchestratorService} knows how to react to:
  * {@link DownstreamUnavailableException} (transient — leave the saga for
  * retry) or {@link SagaStepFailedException} (a real rejection — compensate
- * and fail the saga). Per other-docs/10's confirmed decision, there is no
+ * and fail the saga). There is no
  * third case.
  *
  * <p><b>Three resilience4j {@code CircuitBreaker} instances exist across
- * this call path, not one shared breaker</b> (other-docs/10 Decision 8):
+ * this call path, not one shared breaker</b>:
  * {@link ServiceTokenProvider}'s own internal one guards only the shared
  * token-endpoint fetch (unchanged since {@code lynx-security}'s own
  * hand-rolled {@code CircuitBreaker} was retired — same library

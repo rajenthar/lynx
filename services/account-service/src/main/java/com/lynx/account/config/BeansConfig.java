@@ -30,7 +30,7 @@ import org.springframework.web.client.RestClient;
 @Configuration
 public class BeansConfig {
 
-  /** Same shape as saga-orchestrator's downstream-call breakers (other-docs/10 Decision 8) — one instance, this service's only downstream call. */
+  /** Same shape as saga-orchestrator's downstream-call breakers — one instance, this service's only downstream call. */
   private static final CircuitBreakerConfig LEDGER_CIRCUIT_BREAKER_CONFIG = CircuitBreakerConfig.custom()
       .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
       .slidingWindowSize(5)
@@ -90,7 +90,7 @@ public class BeansConfig {
   }
 
   /**
-   * "Cannot miss a message" (other-docs/12 Decision 8) — {@link
+   * "Cannot miss a message" — {@link
    * com.lynx.account.projection.OutboxEventConsumer#onMessage} no longer
    * catches/swallows failures itself; this bean is what actually handles
    * them. Spring Boot auto-detects a single {@code CommonErrorHandler}

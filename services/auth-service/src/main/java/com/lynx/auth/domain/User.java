@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * A registered end user (other-docs/11 Decision 1) — email + BCrypt password
+ * A registered end user — email + BCrypt password
  * hash + a display name, nothing more. No profile, no phone, no email
  * verification — this is a login, not an account/profile service.
  *

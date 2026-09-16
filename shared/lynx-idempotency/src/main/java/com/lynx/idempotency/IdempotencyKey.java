@@ -10,11 +10,11 @@ import com.lynx.common.error.ValidationException;
  *
  * <p>Sourced differently depending on the caller: a real client-supplied
  * {@code Idempotency-Key} HTTP header for a service that has one (e.g. a
- * future {@code transaction-service} saga-creation endpoint), or an
+ * {@code transaction-service} saga-creation endpoint), or an
  * internally-derived value for a service that doesn't need a separate
  * client key at all — {@code ledger-service} derives it from its own
- * {@code sagaId}, {@code fx-rate-service} from its own {@code executionId}
- * (see other-docs/08 Decision 29). Either way, construction enforces the
+ * {@code sagaId}, {@code fx-rate-service} from its own {@code executionId}.
+ * Either way, construction enforces the
  * contract (present + UUID format), so any {@code IdempotencyKey} instance
  * in the system is known-good — the same "invalid values cannot exist"
  * discipline as {@code Money} and {@code PageRequest}. A missing or
@@ -43,7 +43,7 @@ public record IdempotencyKey(String value) {
 
   /**
    * Wraps a real, client-supplied {@code Idempotency-Key} header value —
-   * e.g. a future {@code transaction-service} saga-creation endpoint,
+   * e.g. {@code transaction-service}'s saga-creation endpoint,
    * reading the header a caller actually sent.
    */
   public static IdempotencyKey fromClientHeader(String value) {
@@ -54,7 +54,7 @@ public record IdempotencyKey(String value) {
    * Wraps a value this service computed itself — never sent by any client
    * as an {@code Idempotency-Key} header. E.g. {@code ledger-service}
    * deriving one from its own {@code sagaId}, or {@code fx-rate-service}
-   * from its own {@code executionId} (other-docs/08 Decision 29).
+   * from its own {@code executionId}.
    */
   public static IdempotencyKey derivedFrom(String value) {
     return new IdempotencyKey(value);

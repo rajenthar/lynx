@@ -21,11 +21,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Purely internal (other-docs/10 Decision 3) — unlike {@code
+ * Purely internal — unlike {@code
  * LedgerController}'s dual end-user-or-internal-service trust boundary,
  * EVERY caller here must already be a proven internal service; there is no
  * end-user path at all. {@code saga-orchestrator} is never called directly
- * by a client request — a future {@code transaction-service} is this
+ * by a client request — {@code transaction-service} is this
  * endpoint's only real caller, deriving {@code sagaId} from the actual
  * end-user's own {@code Idempotency-Key} (ADR-004's original chain) before
  * ever reaching here.

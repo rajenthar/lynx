@@ -1,5 +1,5 @@
 -- Not deployed yet — single starting schema, same convention as
--- ledger-service's own V1 (see other-docs/08's migration-numbering note).
+-- ledger-service's own V1.
 -- Once this service is actually deployed, schema changes go back to
 -- incremental Vn migrations instead of editing V1 directly.
 --
@@ -9,12 +9,11 @@
 -- polling loop claims batches via FOR UPDATE SKIP LOCKED against the two
 -- indexes below; see SagaStateRepository for the exact queries.
 --
--- Surrogate `id` primary key, NOT saga_id (found by direct inspection,
--- other-docs/10 Decision 7) — saga_id is deterministically derived
--- upstream (a future transaction-service, from a real client's own
+-- Surrogate `id` primary key, NOT saga_id (found by direct inspection) —
+-- saga_id is deterministically derived
+-- upstream (transaction-service, from a real client's own
 -- Idempotency-Key), so it can theoretically collide between two unrelated
--- users, same reasoning as ledger/fx_rate_locks (other-docs/08 Decisions
--- 29/31). Worse here than in those tables: with saga_id as a plain
+-- users, same reasoning as ledger/fx_rate_locks. Worse here than in those tables: with saga_id as a plain
 -- single-column PK, two different users could never even coexist as
 -- separate rows on a collision. UNIQUE(user_id, saga_id) below turns a
 -- collision into a harmless, distinguishable extra row instead of one
@@ -34,7 +33,7 @@ CREATE TABLE saga_state (
   execution_id UUID,                     -- deterministic (ExecutionIds), set once LOCKED — fx-rate-service's own idempotency key; reused verbatim on every redo
   filled_rate NUMERIC(19,8),             -- set once EXECUTED — what SETTLE actually credits with, not the original quoted rate
   failure_reason VARCHAR(500),           -- set only on FAILED
-  retried_from_saga_id UUID,             -- audit-only (other-docs/10 Decision 2) — NOT a uniqueness-bearing key, no contention on it
+  retried_from_saga_id UUID,             -- audit-only — NOT a uniqueness-bearing key, no contention on it
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   version BIGINT NOT NULL DEFAULT 0,     -- JPA @Version — belt-and-braces under the SKIP LOCKED claim, see SagaState's javadoc

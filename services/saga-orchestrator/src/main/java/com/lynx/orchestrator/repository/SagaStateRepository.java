@@ -14,9 +14,8 @@ import org.springframework.data.repository.query.Param;
  * Native, not JPQL — {@code FOR UPDATE SKIP LOCKED} has no JPQL/Spring Data
  * equivalent (Spring Data's {@code @Lock(PESSIMISTIC_WRITE)} only ever
  * generates plain {@code FOR UPDATE}, which blocks rather than skipping —
- * see DECISIONS.md's corrected orchestrator-loop note and
- * other-docs/10's plan). Both queries are the exact pattern that doc
- * specifies: {@code ORDER BY} for a deterministic, largely-disjoint scan
+ * see DECISIONS.md's corrected orchestrator-loop note). Both queries
+ * follow the exact pattern the plan specifies: {@code ORDER BY} for a deterministic, largely-disjoint scan
  * order across concurrent instances, {@code LIMIT} for batching (never
  * drain the whole table in one claim), {@code FOR UPDATE SKIP LOCKED} so a
  * second instance skips straight past rows a first instance already
@@ -25,8 +24,8 @@ import org.springframework.data.repository.query.Param;
 public interface SagaStateRepository extends JpaRepository<SagaState, Long> {
 
   /**
-   * Scoped to {@code (sagaId, userId)}, not {@code sagaId} alone — other-docs/10
-   * Decision 7: {@code sagaId} alone can't be mathematically guaranteed
+   * Scoped to {@code (sagaId, userId)}, not {@code sagaId} alone —
+   * {@code sagaId} alone can't be mathematically guaranteed
    * collision-free (it's deterministically derived upstream from a real
    * client's own {@code Idempotency-Key}), and with {@code saga_id} no
    * longer the primary key, an unscoped lookup could return a DIFFERENT

@@ -29,8 +29,7 @@ import org.hibernate.type.SqlTypes;
  * {@code UNIQUE} constraint (it inherits duplicate-prevention for free: the
  * {@code ledger} insert always runs first in the same transaction and is
  * what actually rejects a retry). It's here purely so a {@code saga_id}
- * collision between two different users' sagas (see other-docs/08 Decision
- * 29) doesn't leave their outbox rows indistinguishable from each other —
+ * collision between two different users' sagas doesn't leave their outbox rows indistinguishable from each other —
  * without it, telling the two apart would mean manually decoding each row's
  * JSON {@code payload} instead of a plain {@code WHERE} filter.
  */

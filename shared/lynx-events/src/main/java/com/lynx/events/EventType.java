@@ -12,6 +12,6 @@ public enum EventType {
   RATE_LOCKED,
   TRANSFER_SETTLED,
   TRANSFER_FAILED,
-  /** Not saga-driven (other-docs/12) — a direct deposit into an account. */
+  /** Not saga-driven — a direct deposit into an account. */
   FUNDS_DEPOSITED
 }

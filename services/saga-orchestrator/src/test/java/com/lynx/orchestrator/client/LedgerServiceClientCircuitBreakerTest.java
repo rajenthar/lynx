@@ -28,7 +28,7 @@ import org.springframework.web.client.RestClient;
  * the state machine in isolation) or {@code ServiceTokenProviderTest}
  * (proves the SAME pattern wired around the token fetch): that a
  * downstream-call breaker classifies real HTTP responses correctly before
- * counting anything as a failure — other-docs/10 Decision 8. Uses Spring's
+ * counting anything as a failure. Uses Spring's
  * {@link MockRestServiceServer} bound to a real {@link RestClient}, so the
  * actual {@code HttpServerErrorException}/{@code HttpClientErrorException}
  * mapping runs for real, not simulated.

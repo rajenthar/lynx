@@ -1,5 +1,5 @@
--- other-docs/12: account-service's own tables. Single V1 file — not
--- deployed yet (see other-docs/08's migration-numbering note).
+-- account-service's own tables. Single V1 file — not
+-- deployed yet.
 
 -- One account per (user, currency) — a user can hold as many DIFFERENT
 -- currencies as they like (SGD + USD + EUR, no limit), just not two
@@ -25,8 +25,7 @@ CREATE TABLE accounts (
 
 -- The CQRS projection's own idempotency guard — the "Idempotent Consumer"
 -- pattern (https://microservices.io/patterns/communication-style/idempotent-consumer.html),
--- not a single global high-water-mark (other-docs/12 Decision 7,
--- superseding the original event_offset design). A high-water-mark
+-- not a single global high-water-mark. A high-water-mark
 -- ("skip if eventId <= last seen") silently assumes eventIds arrive in
 -- strictly increasing order — true within ONE Kafka partition, NOT
 -- guaranteed across MULTIPLE partitions of the same topic, where a

@@ -14,8 +14,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * The one row this whole service exists to drive forward (ADR-003,
- * other-docs/10). Unlike {@code LedgerEntry}/{@code OutboxEntry}
+ * The one row this whole service exists to drive forward (ADR-003).
+ * Unlike {@code LedgerEntry}/{@code OutboxEntry}
  * (append-only, never updated), this row IS mutated repeatedly across a
  * saga's lifetime — {@code status} advances HOLDING → LOCKED → EXECUTED →
  * SETTLED, or diverts to FAILED at any point.
@@ -40,7 +40,7 @@ import java.util.UUID;
  * update.
  *
  * <p>Primary key is a surrogate {@code id}, NOT {@code sagaId} — found by
- * direct inspection (other-docs/10 Decision 7). {@code sagaId} is
+ * direct inspection. {@code sagaId} is
  * deterministically derived upstream (by a future {@code
  * transaction-service}, from a real client's own {@code Idempotency-Key}
  * — ADR-004), so it can theoretically collide between two unrelated

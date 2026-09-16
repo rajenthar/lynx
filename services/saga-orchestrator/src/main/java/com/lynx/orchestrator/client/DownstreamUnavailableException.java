@@ -5,8 +5,8 @@ package com.lynx.orchestrator.client;
  * failed for a TRANSIENT reason — unreachable, a 5xx, or
  * {@link io.github.resilience4j.circuitbreaker.CallNotPermittedException}
  * from either a downstream client's own breaker or {@code
- * ServiceTokenProvider}'s internal one guarding the token fetch. Per
- * other-docs/10's confirmed decision: this is NOT a reason to fail the saga — the caller
+ * ServiceTokenProvider}'s internal one guarding the token fetch. This
+ * is NOT a reason to fail the saga — the caller
  * (see {@code SagaOrchestratorService.processOne}) deliberately leaves the
  * saga at its current status on this exception, so the next poll or the
  * recovery worker simply retries the SAME step. Safe by construction:

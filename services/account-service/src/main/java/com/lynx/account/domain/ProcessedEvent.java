@@ -8,7 +8,7 @@ import java.time.Instant;
 
 /**
  * One row per outbox event this projection has ever applied — the
- * "Idempotent Consumer" pattern (other-docs/12 Decision 7), not a single
+ * "Idempotent Consumer" pattern, not a single
  * global high-water-mark. See the {@code processed_events} migration's own
  * comment for why: a high-water-mark assumes strictly increasing delivery
  * order, which Kafka only guarantees WITHIN one partition, not across

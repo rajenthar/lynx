@@ -45,7 +45,7 @@ logging:
 
 lynx:
   security:
-    # auth-service now exists (other-docs/11) and answers exactly this URL
+    # auth-service now exists and answers exactly this URL
     # when run locally on port 8080. Tests still wire an in-memory JWKS
     # directly rather than hitting it over HTTP (see JwtVerifierTest's pattern).
     jwks-url: http://localhost:8080/auth/.well-known/jwks.json

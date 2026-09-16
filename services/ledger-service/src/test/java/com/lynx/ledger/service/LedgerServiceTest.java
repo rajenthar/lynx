@@ -43,7 +43,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Mocked repositories, no Postgres: proves the DR=CR invariant, the correct
  * event/leg construction per phase, and the idempotency-guard wiring
  * (retry for the same saga+phase returns the same response without a
- * second write). No {@code Idempotency-Key} (other-docs/08 Decision 29)
+ * second write). No {@code Idempotency-Key}
  * — {@code (userId, sagaId, phase)} is the
  * whole identity now, derived deterministically inside
  * {@code LedgerService} itself, not supplied by the test.
@@ -138,8 +138,8 @@ class LedgerServiceTest {
 
     ledgerService.hold(UUID.randomUUID(), "user-1", fromAccount, amount);
 
-    // The whole point of other-docs/12 Decision 4: this is ONE atomic
-    // conditional UPDATE (other-docs/12), not a separate read then a
+    // The whole point of the materialized-balance design: this is ONE atomic
+    // conditional UPDATE, not a separate read then a
     // separate decision — see AccountBalanceRepository#debitIfSufficient.
     verify(accountBalanceRepository).debitIfSufficient(fromAccount, "SGD", new BigDecimal("100.00"));
   }
@@ -237,7 +237,7 @@ class LedgerServiceTest {
 
   @Test
   void releaseAfterLockReversesFxLockNotHoldPool() {
-    // Regression test for other-docs/08 Decision 20: a saga that already
+    // Regression test: a saga that already
     // completed `lock` has its money in FX_LOCK, not HOLD_POOL — release
     // must reverse the account the money is ACTUALLY in.
     UUID sagaId = UUID.randomUUID();
@@ -311,8 +311,7 @@ class LedgerServiceTest {
 
   @Test
   void lockedRateThrowsNotFoundWhenTheLockBelongsToADifferentUser() {
-    // Same collision/authz reasoning as auditTrail (other-docs/08 Decision
-    // 30): a lock existing for this sagaId under a DIFFERENT userId must
+    // Same collision/authz reasoning as auditTrail: a lock existing for this sagaId under a DIFFERENT userId must
     // not be readable — 404, indistinguishable from a saga that never
     // reached LOCK at all, so this endpoint can't be used to probe for
     // other users' saga ids.

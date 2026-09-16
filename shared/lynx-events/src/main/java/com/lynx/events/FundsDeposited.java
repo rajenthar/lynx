@@ -4,7 +4,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * A non-saga money-movement event (other-docs/12): funds added to
+ * A non-saga money-movement event: funds added to
  * {@code accountId} from outside the system (the {@code FUNDING_SOURCE}
  * system account). Consumed by account-service to apply
  * {@code available += amount} — the deposit counterpart to

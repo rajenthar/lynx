@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * One row in an account's history (other-docs/12) — unlike {@link
+ * One row in an account's history — unlike {@link
  * LedgerLegView} (a single saga's two legs, where the saga context is
  * already known from the URL), this carries {@code sagaId} and {@code
  * createdAt} since a history listing spans many different sagas/deposits.

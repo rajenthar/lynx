@@ -29,13 +29,13 @@ import org.springframework.web.bind.annotation.RestController;
  * ADR-001's four saga phases as synchronous commands, plus two read-only
  * endpoints (the audit trail and the locked rate). Every write is
  * idempotent per {@code (userId, sagaId, phase)} — no client-supplied
- * {@code Idempotency-Key} header (other-docs/08 Decision 29): ADR-003's
+ * {@code Idempotency-Key} header: ADR-003's
  * rate-lock expiry policy means each phase now happens at most once per
  * saga, forever, so that triple is a complete identity on its own. The two
  * {@code GET} endpoints are scoped by {@code userId} the same way every
  * write is — both to close the same saga_id-collision gap, and because a
  * caller has no business reading a saga's audit trail or locked rate if
- * it isn't theirs (other-docs/08 Decision 31). The caller identity used
+ * it isn't theirs. The caller identity used
  * comes from {@link JwtAuthFilter}'s verified {@link UserContext} for an
  * ordinary end-user token — but for a caller whose token proves it's an
  * internal service (ADR-007 Option C), it comes from an

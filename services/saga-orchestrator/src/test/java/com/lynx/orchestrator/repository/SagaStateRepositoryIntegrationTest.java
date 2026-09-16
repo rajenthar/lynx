@@ -34,7 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Real Postgres 16 via Testcontainers, real Flyway migration, real
- * {@code FOR UPDATE SKIP LOCKED} — the genuine proof other-docs/10's plan
+ * {@code FOR UPDATE SKIP LOCKED} — the genuine proof the plan
  * (and DECISIONS.md's corrected orchestrator-loop note) promised: two
  * concurrent "instances" claiming batches at once must get DISJOINT rows,
  * neither blocking on the other.

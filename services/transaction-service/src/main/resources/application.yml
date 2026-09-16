@@ -1,0 +1,43 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: transaction-service
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-},%X{sagaId:-},%X{correlationId:-}]"
+
+lynx:
+  security:
+    jwks-url: http://localhost:8080/auth/.well-known/jwks.json
+    issuer: https://auth.lynx
+    audience: lynx-api
+  # ADR-007: this service's OWN identity when calling saga-orchestrator/
+  # account-service. Seeded into auth-service's service_clients table at
+  # ITS startup (ServiceClientSeeder).
+  service-token:
+    token-endpoint: http://localhost:8080/auth/token
+    client-id: transaction-service
+    client-secret: placeholder-not-a-real-secret
+  clients:
+    saga-orchestrator:
+      base-url: http://localhost:8083
+    account-service:
+      base-url: http://localhost:8084

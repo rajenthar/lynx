@@ -59,7 +59,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * {@code saga_state} persistence, not a real HTTP round trip to
  * ledger-service/fx-rate-service (those get their own real proof in their
  * own test suites; wiring three real services together end to end is a
- * later, separate verification step — see other-docs/10's Deferred list).
+ * later, separate verification step).
  */
 @Testcontainers
 @SpringBootTest(
@@ -182,7 +182,7 @@ class SagaControllerIntegrationTest {
 
   @Test
   void getForADifferentUserIs404EvenThoughTheSagaExists() throws Exception {
-    // other-docs/10 Decision 7: scoped by (sagaId, userId) — a saga
+    // Scoped by (sagaId, userId) — a saga
     // belonging to a different user reads back as 404, indistinguishable
     // from a saga that never existed.
     UUID sagaId = UUID.randomUUID();

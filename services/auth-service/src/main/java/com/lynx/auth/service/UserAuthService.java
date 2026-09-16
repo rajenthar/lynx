@@ -11,7 +11,7 @@ import java.util.UUID;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 /**
- * Registration and login (other-docs/11 Decision 1) — a real Postgres-backed
+ * Registration and login — a real Postgres-backed
  * user, BCrypt-hashed password, no email verification/reset/lockout. Every
  * registered user gets the plain {@code user} role; there's no admin/elevated
  * role concept yet.

@@ -47,7 +47,7 @@ import org.slf4j.LoggerFactory;
  *       effect on, whatever the caller does with the token afterward.
  *       resilience4j — this class's own hand-rolled {@code CircuitBreaker}
  *       was retired once a second real caller ({@code saga-orchestrator}'s
- *       downstream-call breakers, other-docs/10 Decision 8) needed the
+ *       downstream-call breakers) needed the
  *       dependency anyway; no {@code ignoreExceptions(...)} needed here
  *       unlike those — every {@link ServiceTokenException} this fetch can
  *       throw genuinely IS a token-endpoint failure, there's no 4xx-vs-5xx

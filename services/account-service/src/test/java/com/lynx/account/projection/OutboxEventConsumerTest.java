@@ -20,8 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.Acknowledgment;
 
 /**
- * Real Postgres/Kafka are both out of scope here (other-docs/12's
- * test-boundary decision) — this proves only what {@link
+ * Real Postgres/Kafka are both out of scope here — this proves only what {@link
  * OutboxEventConsumer#onMessage} itself decides: skip vs. process vs.
  * propagate. The container's own retry/backoff/dead-letter behavior,
  * triggered by a propagated exception, is Spring Kafka's library code.
@@ -75,7 +74,7 @@ class OutboxEventConsumerTest {
     when(processedEventRepository.existsById(42L)).thenReturn(true);
     // Deliberately malformed payload — proves the existsById short-circuit
     // happens BEFORE decoding, exactly the "very beginning" check raised
-    // on review (other-docs/12 Decision 8): this must NOT throw.
+    // on review: this must NOT throw.
     String message = "{\"id\":42,\"saga_id\":\"" + UUID.randomUUID() + "\",\"payload\":\"not valid json at all\"}";
 
     consumer.onMessage(message, ack);

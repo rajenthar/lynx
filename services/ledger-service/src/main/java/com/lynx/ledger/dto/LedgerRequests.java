@@ -36,7 +36,7 @@ public final class LedgerRequests {
       String onBehalfOfUserId) {
   }
 
-  /** other-docs/12 — {@code accountId} is the account being credited, not a saga counterparty. */
+  /** {@code accountId} is the account being credited, not a saga counterparty. */
   public record DepositRequest(
       UUID accountId, BigDecimal amount, String currencyCode, String onBehalfOfUserId) {
   }

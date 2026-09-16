@@ -13,8 +13,8 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
- * The consuming side of ADR-002's CDC pipeline — the first real one
- * (other-docs/12). Debezium's Postgres connector, registered against
+ * The consuming side of ADR-002's CDC pipeline — the first real one.
+ * Debezium's Postgres connector, registered against
  * {@code ledger-service}'s {@code public.outbox} table (see
  * {@code infra/debezium/ledger-outbox-connector.json}), produces one flat
  * JSON row per outbox insert onto {@code lynx.public.outbox} — the
@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
  * payload, created_at}).
  *
  * <p><b>A short-circuit check, BEFORE decoding {@code payload}</b>
- * (other-docs/12 Decision 8, raised directly on review): the row's own
+ *: the row's own
  * {@code id} field — which IS the event's id — is read straight off the
  * envelope, so "have I already fully handled this event" (applied
  * successfully, OR already sent to the dead-letter topic) can be checked
@@ -42,12 +42,12 @@ import org.springframework.stereotype.Component;
  * transient failure — e.g. Postgres briefly unreachable — then succeeds
  * on redelivery) and, only once retries are exhausted, publishes the RAW
  * original message to a {@code .DLT} topic and commits the offset for it
- * — "cannot miss a message" (other-docs/12 Decision 8) means a permanently
+ * — "cannot miss a message" means a permanently
  * malformed or failing message is preserved for investigation, never
  * silently dropped, which the previous catch-log-and-ack version did.
  *
  * <p>Deliberately NOT unit-tested via a real embedded/Testcontainers Kafka
- * broker (see other-docs/12's test-boundary decision) — this class's OWN
+ * broker — this class's OWN
  * logic (the short-circuit, and that failures propagate rather than being
  * swallowed) IS unit-tested directly (mocked collaborators); the
  * container's retry/backoff/dead-letter behavior is Spring Kafka's own

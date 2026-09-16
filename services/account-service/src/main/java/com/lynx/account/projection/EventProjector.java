@@ -20,7 +20,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Applies one decoded event to the balance projection (ADR-005) — the
  * actual "read model" half of CQRS. Idempotent by construction: the
- * "Idempotent Consumer" pattern (other-docs/12 Decision 7) —
+ * "Idempotent Consumer" pattern —
  * {@code processed_events} records this exact {@code eventId} exactly
  * once, in the SAME transaction as the balance mutation, so an
  * at-least-once Kafka redelivery is a clean no-op, not a double-applied
@@ -30,7 +30,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * safe to drop here: every adjustment below is an unconditional additive
  * delta, so order was never actually required, only exactly-once application.
  *
- * <p>Five event types, four of which move money (other-docs/12):
+ * <p>Five event types, four of which move money:
  * <ul>
  *   <li>{@link TransferHeld} — {@code available -= amount, held += amount}
  *       on the source account (funds reserved, not yet gone)

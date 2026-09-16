@@ -9,7 +9,7 @@ import org.springframework.data.repository.query.Param;
 public interface ProcessedEventRepository extends JpaRepository<ProcessedEvent, Long> {
 
   /**
-   * The whole mechanism (other-docs/12 Decision 7) — one atomic statement,
+   * The whole mechanism — one atomic statement,
    * not a separate exists-check followed by an insert (which would itself
    * be racy under concurrent consumers). Returns 1 if this event id was
    * genuinely new (go ahead and apply it), 0 if it was already recorded

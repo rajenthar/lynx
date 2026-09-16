@@ -14,7 +14,7 @@ public interface AccountRepository extends JpaRepository<Account, UUID> {
 
   List<Account> findByUserId(String userId);
 
-  /** Backs the one-account-per-currency rule (other-docs/12) — checked before {@code createAccount} inserts. */
+  /** Backs the one-account-per-currency rule — checked before {@code createAccount} inserts. */
   Optional<Account> findByUserIdAndCurrency(String userId, String currency);
 
   /**
