@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.lynx</groupId>
+    <artifactId>lynx-parent</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>api-gateway</artifactId>
+  <packaging>jar</packaging>
+
+  <name>api-gateway</name>
+  <description>The one public entry point (other-docs/14) — path-based routing to auth-service/account-service/transaction-service's own end-user surfaces, plus per-user/per-IP rate limiting (the one gap this module exists to close, ADR-004's Security Considerations)</description>
+
+  <properties>
+    <!-- Explicit for clarity, even though it's already inherited from
+         lynx-parent's own maven.compiler.release/source/target (root
+         pom.xml) — makes this module's Java version visible without
+         needing to open the parent. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <!-- Reactive/WebFlux-based, NOT spring-boot-starter-web — the one
+         real architectural departure from every other service in this
+         project (other-docs/14). A gateway is I/O-bound and high-fan-out
+         by nature, exactly the case the reactive stack is built for. -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-gateway</artifactId>
+    </dependency>
+
+    <!-- Backs the built-in RequestRateLimiter filter's RedisRateLimiter
+         (a token-bucket algorithm, atomic Lua script) — the reactive
+         Redis client, since this module is reactive throughout. Same
+         underlying Redis dependency lynx-idempotency's
+         RedisIdempotencyCache already uses elsewhere in this project,
+         just the reactive driver instead of the blocking one. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-otlp</artifactId>
+    </dependency>
+
+    <!-- The STANDALONE, shaded artifact — not wiremock-jre8: that one's
+         own transitive Jetty 9 clashes with the Jetty 12 Spring Boot's
+         own BOM manages for this module's reactive stack, a real
+         classpath conflict (NoClassDefFoundError at server startup).
+         wiremock-standalone shades/relocates its own dependencies
+         (including Jetty) internally specifically to avoid this. -->
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <version>3.9.1</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.projectreactor</groupId>
+      <artifactId>reactor-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>testcontainers-bom</artifactId>
+        <version>1.20.1</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>
