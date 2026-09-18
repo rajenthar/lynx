@@ -63,6 +63,13 @@
       <artifactId>spring-boot-starter-data-jpa</artifactId>
     </dependency>
 
+    <!-- JavaMailSender, auto-configured from spring.mail.* — sends the OTP
+         verification email over SMTP (Gmail today; see
+         docs/html/utils/smtp-gmail-flows.html). -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>

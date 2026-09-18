@@ -5,10 +5,14 @@ import com.lynx.security.ServiceTokenException;
 import com.lynx.security.ServiceTokenProvider;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
@@ -77,6 +81,42 @@ public class LedgerServiceClient {
       log.warn("ledger-service deposit call failed for depositId={}", depositId, e);
       throw new LedgerUnavailableException("Downstream call failed: " + e.getMessage(), e);
     }
+  }
+
+  /**
+   * The audit trail for one account — ownership must already be verified
+   * by the caller ({@code AccountService.getAccountHistory}) BEFORE this is
+   * called: ledger-service's endpoint has no notion of account ownership at
+   * all (see its own controller javadoc), so this service is the one place
+   * that check can happen. No {@code onBehalfOfUserId} needed — unlike
+   * {@code deposit}, nothing here is scoped to a specific end user from
+   * ledger-service's point of view, only to an accountId already confirmed
+   * to belong to the caller.
+   */
+  public List<HistoryEntry> history(UUID accountId, int limit) {
+    String token;
+    try {
+      token = tokenProvider.currentToken();
+    } catch (CallNotPermittedException | ServiceTokenException e) {
+      throw new LedgerUnavailableException("Could not obtain a service token: " + e.getMessage(), e);
+    }
+    try {
+      return circuitBreaker.executeSupplier(() -> restClient.get()
+          .uri("/v1/ledger/accounts/{accountId}/history?limit={limit}", accountId, limit)
+          .header("Authorization", "Bearer " + token)
+          .retrieve()
+          .body(new ParameterizedTypeReference<List<HistoryEntry>>() { }));
+    } catch (CallNotPermittedException e) {
+      throw new LedgerUnavailableException("Circuit open for ledger-service: " + e.getMessage(), e);
+    } catch (HttpServerErrorException | ResourceAccessException e) {
+      log.warn("ledger-service history call failed for accountId={}", accountId, e);
+      throw new LedgerUnavailableException("Downstream call failed: " + e.getMessage(), e);
+    }
+  }
+
+  /** Mirrors ledger-service's own {@code LedgerHistoryEntryView} — deliberately a separate, loosely-coupled copy, same as every other cross-service DTO in this project. */
+  public record HistoryEntry(
+      UUID sagaId, String entryType, UUID accountId, BigDecimal amount, String currency, Instant createdAt) {
   }
 
   /** Transient — the caller may retry with the SAME {@code depositId}. */

@@ -80,19 +80,24 @@ public class BeansConfig {
 
   @Bean
   public LedgerServiceClient ledgerServiceClient(
+      RestClient.Builder restClientBuilder,
       @Value("${lynx.clients.ledger-service.base-url}") String baseUrl,
       ServiceTokenProvider serviceTokenProvider) {
     CircuitBreaker circuitBreaker = CircuitBreaker.of("ledger-service", DOWNSTREAM_CALL_CIRCUIT_BREAKER_CONFIG);
+    // The INJECTED builder, not RestClient.builder() called directly — see
+    // docs/html/metrics_traces_logs/trace-propagation.html for why this is
+    // what makes cross-service trace propagation actually work.
     return new LedgerServiceClient(
-        RestClient.builder().baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
+        restClientBuilder.baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
   }
 
   @Bean
   public FxRateServiceClient fxRateServiceClient(
+      RestClient.Builder restClientBuilder,
       @Value("${lynx.clients.fx-rate-service.base-url}") String baseUrl,
       ServiceTokenProvider serviceTokenProvider) {
     CircuitBreaker circuitBreaker = CircuitBreaker.of("fx-rate-service", DOWNSTREAM_CALL_CIRCUIT_BREAKER_CONFIG);
     return new FxRateServiceClient(
-        RestClient.builder().baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
+        restClientBuilder.baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
   }
 }

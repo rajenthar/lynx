@@ -20,9 +20,21 @@ import org.springframework.stereotype.Component;
  * JSON row per outbox insert onto {@code lynx.public.outbox} — the
  * connector's {@code unwrap} SMT ({@code ExtractNewRecordState}) strips
  * Debezium's {@code {before, after, source, op, ts_ms}} change-event
- * envelope entirely, so the Kafka message VALUE here is just the outbox
- * row's own columns directly ({@code id, saga_id, user_id, event_type,
- * payload, created_at}).
+ * envelope entirely, so the Kafka message VALUE here is the outbox row's
+ * own columns ({@code id, saga_id, user_id, event_type, payload,
+ * created_at}) — either directly, OR wrapped one level inside a Kafka
+ * Connect {@code {schema, payload}} JSON-converter envelope. The latter is
+ * REQUIRED (see {@code value.converter.schemas.enable: true} in
+ * {@code infra/debezium/ledger-outbox-connector.json}) — without it,
+ * {@code JsonConverter} silently corrupts this table's OWN {@code payload}
+ * column (the JSONB event envelope, a Debezium {@code io.debezium.data.Json}
+ * semantic-typed string field) into a bare {@code "{}"}, discovered the hard
+ * way running this against a real Debezium instance. {@link #rowNode}
+ * disambiguates the two shapes by checking whether the OUTER {@code
+ * payload} field is itself an object (the Connect envelope) or a string
+ * (this table's own column, unwrapped already) — so both real Debezium
+ * messages AND this class's own flat-row unit test fixtures decode
+ * identically.
  *
  * <p><b>A short-circuit check, BEFORE decoding {@code payload}</b>
  *: the row's own
@@ -68,15 +80,34 @@ public class OutboxEventConsumer {
     this.processedEventRepository = processedEventRepository;
   }
 
+  /** {@code OutboxEntry}'s own placeholder — never a genuine, fully-written event. */
+  private static final String PLACEHOLDER_PAYLOAD = "{}";
+
   @KafkaListener(topics = "${lynx.kafka.outbox-topic}", groupId = "${spring.kafka.consumer.group-id}")
   public void onMessage(String message, Acknowledgment ack) {
-    JsonNode root = parse(message);
+    JsonNode root = rowNode(parse(message));
     if (root == null || root.isNull() || root.get("payload") == null) {
       // A DELETE/tombstone, or some other shape without a payload — outbox
       // rows are never deleted or updated by ledger-service, so this
       // shouldn't occur in practice; a genuine no-op, not a failure —
       // acked directly, never sent through the error handler.
       log.debug("Skipping a change event with no 'payload' field");
+      ack.acknowledge();
+      return;
+    }
+    if (PLACEHOLDER_PAYLOAD.equals(root.get("payload").asText())) {
+      // An intermediate row VERSION, not a genuine event — CDC (Debezium
+      // reading Postgres's WAL) replicates every row version a transaction
+      // produces, not just its final one. Even though ledger-service now
+      // writes the outbox row in a single INSERT already carrying the real
+      // payload (see OutboxEntry's own javadoc), a real Debezium instance
+      // was STILL observed emitting an extra change event whose payload is
+      // this exact placeholder for the SAME row/id. Treating it as a
+      // decode failure (and dead-lettering it) would poison this eventId's
+      // dedup entry BEFORE the real, later delivery ever arrives — this
+      // skip is what actually prevents that: a benign no-op, acked
+      // directly, never sent through the error handler.
+      log.debug("Skipping a change event whose payload is still the unwritten placeholder");
       ack.acknowledge();
       return;
     }
@@ -110,6 +141,21 @@ public class OutboxEventConsumer {
   }
 
   /**
+   * Strips the Kafka Connect {@code {schema, payload}} envelope, if present
+   * — see this class's own javadoc for why {@code schemas.enable: true} is
+   * required and what it does to the wire shape. Disambiguates from this
+   * table's OWN {@code payload} column (always a JSON string) by checking
+   * whether the outer {@code payload} field is an OBJECT — only the Connect
+   * envelope's is; a flat row's own {@code payload} column value never is.
+   */
+  private static JsonNode rowNode(JsonNode parsed) {
+    if (parsed != null && parsed.has("schema") && parsed.has("payload") && parsed.get("payload").isObject()) {
+      return parsed.get("payload");
+    }
+    return parsed;
+  }
+
+  /**
    * Best-effort — used by {@link ProcessedEventMarkingRecoverer} to extract
    * the same {@code id} field this class's own short-circuit checks, from
    * a record that's already known to be going to the dead-letter topic.
@@ -120,7 +166,7 @@ public class OutboxEventConsumer {
    */
   static Long extractEventIdOrNull(String message) {
     try {
-      JsonNode root = MAPPER.readTree(message);
+      JsonNode root = rowNode(MAPPER.readTree(message));
       JsonNode id = root == null ? null : root.get("id");
       return id == null || id.isNull() ? null : id.asLong();
     } catch (Exception e) {

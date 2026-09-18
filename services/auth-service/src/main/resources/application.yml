@@ -9,14 +9,69 @@ spring:
     # lynx-postgres container, port 5433) — this service owns its own
     # tables (users, service_clients) within it.
     url: jdbc:postgresql://localhost:5433/lynx
-    username: lynx
-    password: lynx
+    # Local dev only ever needs the default — DB_USERNAME/DB_PASSWORD are
+    # what get set for real everywhere else (a deployed environment's own
+    # secret store, or a cloud platform's env var UI), never committed with
+    # a real value.
+    username: ${DB_USERNAME:lynx}
+    password: ${DB_PASSWORD:lynx}
   jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
   flyway:
     enabled: true
+    # Every service shares ONE Postgres database (see datasource note above)
+    # but Flyway's default history table name is the same for everyone —
+    # without a per-service name here, this service's "version 1" collides
+    # with every OTHER service's own "version 1" (different SQL, same
+    # version number), and Flyway rejects the checksum mismatch.
+    table: flyway_schema_history_auth
+    # This schema is shared by every service and may already have OTHER
+    # services' tables in it when this one migrates for the first time —
+    # without this, Flyway refuses to guess whether a "non-empty schema, no
+    # history table (for MY table name)" state is safe to proceed from.
+    baseline-on-migrate: true
+    # Baseline BELOW version 1, not at it (Flyway's own default) — otherwise
+    # baselining would mark V1 itself as "already applied" and skip it,
+    # meaning this service's own tables would never actually get created.
+    baseline-version: "0"
+  # Gmail SMTP for the OTP verification email — see
+  # docs/html/utils/smtp-gmail-flows.html for exactly what each of these
+  # properties does. Real credentials come from environment variables
+  # (MAIL_USERNAME/MAIL_PASSWORD), never committed in plaintext; the
+  # defaults below are placeholders that only work once both are set.
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:your-email@gmail.com}
+    password: ${MAIL_PASSWORD:changeme-use-a-gmail-app-password}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+lynx:
+  mail:
+    from-address: ${MAIL_USERNAME:your-email@gmail.com}
+  security:
+    # This service verifying its OWN tokens for /auth/me — same JWKS
+    # endpoint every other service already fetches from, just looped back
+    # to itself instead of a remote host.
+    jwks-url: http://localhost:8080/auth/.well-known/jwks.json
+    issuer: https://auth.lynx
+    audience: lynx-api
+  clients:
+    # Called once, right after OTP verification, to seed a new user's
+    # default SGD account — see AccountServiceClient's own javadoc. This
+    # service already MINTS the service-identity token it sends (it IS
+    # auth-service, no need to round-trip through its own /auth/token
+    # endpoint like every other caller does), so unlike ledger-service's
+    # client there's no separate client-id/client-secret pair here.
+    account-service:
+      base-url: http://localhost:8084
 
 management:
   tracing:

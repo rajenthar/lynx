@@ -48,12 +48,22 @@ CREATE INDEX idx_ledger_account_id ON ledger (account_id, created_at);
 -- users still leaves their outbox rows
 -- individually filterable, instead of indistinguishable except by
 -- decoding each row's JSON payload by hand.
+-- payload is TEXT, not JSONB — a real Debezium/pgoutput instance was found
+-- to silently corrupt a JSONB column's content into "{}" for STREAMING
+-- (WAL) capture specifically (a snapshot read was unaffected), regardless
+-- of schemas.enable or REPLICA IDENTITY FULL — a documented Debezium/
+-- pgoutput interaction with jsonb's "io.debezium.data.Json" semantic type.
+-- Nothing in this codebase ever queries INTO this column with Postgres's
+-- own JSON operators (it's written once, read back whole by
+-- OutboxEventConsumer), so TEXT loses nothing functionally while sidestepping
+-- the bug entirely — Debezium maps a plain TEXT column with no special
+-- semantic type, just a normal string.
 CREATE TABLE outbox (
   id BIGSERIAL PRIMARY KEY,
   saga_id UUID NOT NULL,
   user_id VARCHAR(255) NOT NULL,
   event_type VARCHAR(30) NOT NULL,
-  payload JSONB NOT NULL,
+  payload TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   published_at TIMESTAMPTZ,
   status VARCHAR(10) NOT NULL DEFAULT 'PENDING'

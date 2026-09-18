@@ -1,5 +1,6 @@
 package com.lynx.account.api;
 
+import com.lynx.account.client.LedgerServiceClient.HistoryEntry;
 import com.lynx.account.config.JwtAuthFilter;
 import com.lynx.account.domain.Account;
 import com.lynx.account.dto.AccountDtos.AccountView;
@@ -63,6 +64,21 @@ public class AccountController {
   public List<AccountView> list(HttpServletRequest httpRequest) {
     String userId = userId(httpRequest);
     return accountService.listAccounts(userId).stream().map(AccountController::toView).toList();
+  }
+
+  /** The currencies a new account (or a transfer's "to" side) may be denominated in — see {@code SupportedCurrencies}. */
+  @GetMapping("/currencies")
+  public List<String> currencies() {
+    return accountService.listSupportedCurrencies();
+  }
+
+  @GetMapping("/{accountId}/history")
+  public List<HistoryEntry> history(
+      @PathVariable UUID accountId,
+      @org.springframework.web.bind.annotation.RequestParam(required = false, defaultValue = "50") int limit,
+      HttpServletRequest httpRequest) {
+    String userId = userId(httpRequest);
+    return accountService.getAccountHistory(accountId, userId, limit);
   }
 
   private static String userId(HttpServletRequest request) {

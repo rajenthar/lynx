@@ -6,6 +6,7 @@ import java.math.MathContext;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +25,15 @@ public class MockQuoteProvider implements QuoteProvider {
 
   /** Real quotes are only valid briefly — real market rates move fast. */
   static final Duration QUOTE_TTL = Duration.ofSeconds(60);
+
+  /**
+   * Every pair here has USD on one side — this is a hub-and-spoke table,
+   * not a full pairwise matrix. A pair with neither side being USD (e.g.
+   * SGD/EUR, both real Lynx-supported currencies) has no direct entry and
+   * is never expected to — {@link #rateFor} bridges it through USD
+   * instead of needing an entry for every possible combination.
+   */
+  private static final String USD = "USD";
 
   private static final Map<String, BigDecimal> RATES = Map.of(
       "SGD/USD", new BigDecimal("0.7412"),
@@ -61,16 +71,37 @@ public class MockQuoteProvider implements QuoteProvider {
     if (fromCurrency.equals(toCurrency)) {
       return BigDecimal.ONE;
     }
-    String pair = fromCurrency + "/" + toCurrency;
-    BigDecimal direct = RATES.get(pair);
-    if (direct != null) {
-      return direct;
+    Optional<BigDecimal> direct = legRate(fromCurrency, toCurrency);
+    if (direct.isPresent()) {
+      return direct.get();
     }
-    BigDecimal reciprocal = RATES.get(toCurrency + "/" + fromCurrency);
-    if (reciprocal != null) {
-      return BigDecimal.ONE.divide(reciprocal, MathContext.DECIMAL64);
+    // Neither side of this pair is directly quoted against the other —
+    // true for any pair where NEITHER side is USD (e.g. SGD/EUR), since
+    // RATES only ever quotes each currency against USD. Bridge it:
+    // fromCurrency -> USD -> toCurrency, using the same single-leg
+    // lookup (direct or reciprocal) for each half.
+    Optional<BigDecimal> fromToUsd = legRate(fromCurrency, USD);
+    Optional<BigDecimal> usdToTarget = legRate(USD, toCurrency);
+    if (fromToUsd.isPresent() && usdToTarget.isPresent()) {
+      return fromToUsd.get().multiply(usdToTarget.get(), MathContext.DECIMAL64);
     }
     log.warn("No mock rate available for {} -> {}", fromCurrency, toCurrency);
     throw BusinessRuleException.currencyNotSupported(fromCurrency + " -> " + toCurrency);
+  }
+
+  /** A single leg's rate, direct or derived from its reciprocal — empty if this currency isn't quoted at all. */
+  private static Optional<BigDecimal> legRate(String fromCurrency, String toCurrency) {
+    if (fromCurrency.equals(toCurrency)) {
+      return Optional.of(BigDecimal.ONE);
+    }
+    BigDecimal direct = RATES.get(fromCurrency + "/" + toCurrency);
+    if (direct != null) {
+      return Optional.of(direct);
+    }
+    BigDecimal reciprocal = RATES.get(toCurrency + "/" + fromCurrency);
+    if (reciprocal != null) {
+      return Optional.of(BigDecimal.ONE.divide(reciprocal, MathContext.DECIMAL64));
+    }
+    return Optional.empty();
   }
 }

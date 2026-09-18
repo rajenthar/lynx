@@ -5,6 +5,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.listener.ConsumerRecordRecoverer;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Wraps a delegate recoverer (a {@code DeadLetterPublishingRecoverer} —
@@ -18,6 +19,16 @@ import org.springframework.kafka.listener.ConsumerRecordRecoverer;
  * "also avoid a duplicate DLT entry on top of that," so a record whose id
  * can't even be parsed just skips the marking step rather than failing
  * the whole recovery.
+ *
+ * <p>{@code accept} runs on Kafka's own error-handling thread, with no
+ * transaction already open — a bare {@code markProcessedIfNew} call (a
+ * {@code @Modifying} native query) throws {@code
+ * InvalidDataAccessApiUsageException} without one. Wrapped in the SAME
+ * {@link TransactionTemplate} {@link EventProjector} already uses for
+ * exactly this reason, rather than {@code @Transactional} — this class is
+ * constructed with {@code new} (see {@code BeansConfig}), not a
+ * Spring-managed bean, so an annotation here would never actually be
+ * proxied.
  */
 public class ProcessedEventMarkingRecoverer implements ConsumerRecordRecoverer {
 
@@ -25,11 +36,14 @@ public class ProcessedEventMarkingRecoverer implements ConsumerRecordRecoverer {
 
   private final ConsumerRecordRecoverer delegate;
   private final ProcessedEventRepository processedEventRepository;
+  private final TransactionTemplate transactionTemplate;
 
   public ProcessedEventMarkingRecoverer(ConsumerRecordRecoverer delegate,
-                                         ProcessedEventRepository processedEventRepository) {
+                                         ProcessedEventRepository processedEventRepository,
+                                         TransactionTemplate transactionTemplate) {
     this.delegate = delegate;
     this.processedEventRepository = processedEventRepository;
+    this.transactionTemplate = transactionTemplate;
   }
 
   @Override
@@ -44,7 +58,7 @@ public class ProcessedEventMarkingRecoverer implements ConsumerRecordRecoverer {
           record.topic(), record.partition(), record.offset());
       return;
     }
-    processedEventRepository.markProcessedIfNew(eventId);
+    transactionTemplate.executeWithoutResult(status -> processedEventRepository.markProcessedIfNew(eventId));
     log.warn("Dead-lettered eventId={} after exhausting retries (topic={}, partition={}, offset={}): {}",
         eventId, record.topic(), record.partition(), record.offset(), exception.getMessage());
   }

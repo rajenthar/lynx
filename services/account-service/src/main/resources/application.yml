@@ -6,14 +6,26 @@ spring:
     name: account-service
   datasource:
     url: jdbc:postgresql://localhost:5433/lynx
-    username: lynx
-    password: lynx
+    username: ${DB_USERNAME:lynx}
+    password: ${DB_PASSWORD:lynx}
   jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
   flyway:
     enabled: true
+    # Every service shares ONE Postgres database but Flyway's default
+    # history table name is the same for everyone — without a per-service
+    # name here, this service's "version 1" collides with every OTHER
+    # service's own "version 1" (different SQL, same version number).
+    table: flyway_schema_history_account
+    # This schema is shared by every service and may already have OTHER
+    # services' tables in it when this one migrates for the first time.
+    baseline-on-migrate: true
+    # Baseline BELOW version 1, not at it — otherwise V1 itself would be
+    # skipped as "already applied" and this service's own tables would
+    # never actually get created.
+    baseline-version: "0"
   kafka:
     bootstrap-servers: localhost:19092
     consumer:
@@ -70,7 +82,7 @@ lynx:
   service-token:
     token-endpoint: http://localhost:8080/auth/token
     client-id: account-service
-    client-secret: placeholder-not-a-real-secret
+    client-secret: ${LYNX_SERVICE_CLIENT_SECRET:placeholder-not-a-real-secret}
   clients:
     ledger-service:
       base-url: http://localhost:8081

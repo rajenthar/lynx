@@ -56,20 +56,25 @@ public class BeansConfig {
 
   @Bean
   public SagaOrchestratorClient sagaOrchestratorClient(
+      RestClient.Builder restClientBuilder,
       @Value("${lynx.clients.saga-orchestrator.base-url}") String baseUrl,
       ServiceTokenProvider serviceTokenProvider) {
     CircuitBreaker circuitBreaker = CircuitBreaker.of("saga-orchestrator", DOWNSTREAM_CALL_CIRCUIT_BREAKER_CONFIG);
+    // The INJECTED builder, not RestClient.builder() called directly — see
+    // docs/html/metrics_traces_logs/trace-propagation.html for why this is
+    // what makes cross-service trace propagation actually work.
     return new SagaOrchestratorClient(
-        RestClient.builder().baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
+        restClientBuilder.baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
   }
 
   @Bean
   public AccountServiceClient accountServiceClient(
+      RestClient.Builder restClientBuilder,
       @Value("${lynx.clients.account-service.base-url}") String baseUrl,
       ServiceTokenProvider serviceTokenProvider) {
     CircuitBreaker circuitBreaker = CircuitBreaker.of("account-service", DOWNSTREAM_CALL_CIRCUIT_BREAKER_CONFIG);
     return new AccountServiceClient(
-        RestClient.builder().baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
+        restClientBuilder.baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
   }
 
   @Bean

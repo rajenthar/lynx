@@ -44,3 +44,32 @@ CREATE TABLE processed_events (
     event_id BIGINT PRIMARY KEY,
     processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- A user's own address book for transfers — "save this recipient as 'Bob'"
+-- so future transfers don't require retyping a raw userId. Deliberately a
+-- real, server-side, per-user table (NOT client-side localStorage, which
+-- was tried first and rejected: it doesn't survive a new device/browser,
+-- doesn't sync across sessions, and is scoped to the browser origin
+-- rather than to which Lynx account is actually logged in).
+--
+-- Two UNIQUE constraints enforce the two collision rules this feature
+-- needs, AT THE DATABASE LEVEL (not just in application code, which is
+-- itself checked first for a friendlier error, same pattern as
+-- accounts' own UNIQUE(user_id, currency)):
+--   1. (user_id, recipient_user_id) — the SAME recipient can only be
+--      saved once per user; saving them again is an UPDATE (new label),
+--      never a second row.
+--   2. (user_id, lower(label)) — a functional unique index, so two
+--      DIFFERENT recipients can never share a label (case-insensitively)
+--      for the SAME user — labels must stay unambiguous.
+CREATE TABLE saved_recipients (
+    id UUID PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    recipient_user_id VARCHAR(255) NOT NULL,
+    label VARCHAR(100) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (user_id, recipient_user_id)
+);
+
+CREATE UNIQUE INDEX idx_saved_recipients_user_label ON saved_recipients (user_id, lower(label));

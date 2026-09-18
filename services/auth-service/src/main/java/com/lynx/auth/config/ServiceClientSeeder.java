@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -35,21 +36,30 @@ public class ServiceClientSeeder implements CommandLineRunner {
 
   private static final Logger log = LoggerFactory.getLogger(ServiceClientSeeder.class);
 
-  private record SeedClient(String clientId, String clientSecret, String[] roles) {
+  private record SeedClient(String clientId, String[] roles) {
   }
 
   private static final List<SeedClient> SEED_CLIENTS = List.of(
-      new SeedClient("saga-orchestrator", "placeholder-not-a-real-secret", new String[] {"internal-service"}),
-      new SeedClient("account-service", "placeholder-not-a-real-secret", new String[] {"internal-service"}),
-      new SeedClient("transaction-service", "placeholder-not-a-real-secret", new String[] {"internal-service"}));
+      new SeedClient("saga-orchestrator", new String[] {"internal-service"}),
+      new SeedClient("account-service", new String[] {"internal-service"}),
+      new SeedClient("transaction-service", new String[] {"internal-service"}));
 
   private final ServiceClientRepository serviceClientRepository;
   private final BCryptPasswordEncoder passwordEncoder;
+  // Same value each caller's own application.yml reads as `service-token.client-secret`
+  // — one shared env var rather than one per service, since every internal
+  // caller here is trusted equally (ADR-007 Option C) and there's no
+  // per-service secret rotation need yet. Never committed with a real
+  // value; the placeholder default only matches across services when NONE
+  // of them override it, which is exactly the local-dev case.
+  private final String clientSecret;
 
   public ServiceClientSeeder(
-      ServiceClientRepository serviceClientRepository, BCryptPasswordEncoder passwordEncoder) {
+      ServiceClientRepository serviceClientRepository, BCryptPasswordEncoder passwordEncoder,
+      @Value("${lynx.service-client-secret:placeholder-not-a-real-secret}") String clientSecret) {
     this.serviceClientRepository = serviceClientRepository;
     this.passwordEncoder = passwordEncoder;
+    this.clientSecret = clientSecret;
   }
 
   @Override
@@ -59,7 +69,7 @@ public class ServiceClientSeeder implements CommandLineRunner {
         continue;
       }
       serviceClientRepository.save(new ServiceClient(
-          seed.clientId(), passwordEncoder.encode(seed.clientSecret()), seed.roles(), Instant.now()));
+          seed.clientId(), passwordEncoder.encode(clientSecret), seed.roles(), Instant.now()));
       log.info("Seeded service_clients row for '{}' (local dev convenience — matches its own application.yml placeholder)",
           seed.clientId());
     }

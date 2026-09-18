@@ -7,9 +7,24 @@ CREATE TABLE users (
     email TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
+
+-- One row per OTP sent. A new registration/resend inserts a fresh row rather
+-- than updating one in place, so a user who mistypes an old code doesn't
+-- accidentally get validated against a stale row still lying around.
+CREATE TABLE email_otps (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    code TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_email_otps_user_id ON email_otps(user_id);
 
 -- Who may request a service-identity token via the Client Credentials grant
 -- (ADR-007 Option C). The secret is stored only as
