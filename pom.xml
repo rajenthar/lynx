@@ -65,7 +65,14 @@
 
     <!-- Dependencies -->
     <spring-boot.version>3.3.0</spring-boot.version>
-    <spring-cloud.version>2023.0.0</spring-cloud.version>
+    <!-- 2023.0.0 (this train's original release) only declares
+         compatibility with Spring Boot 3.2.x — its own
+         CompatibilityVerifier rejects startup against this project's
+         Boot 3.3.0 otherwise (other-docs/14, api-gateway — the first
+         real Spring Cloud consumer in this project). 2023.0.3 is the
+         patch that added 3.3.x support to the SAME 2023.0.x release
+         train, not a train upgrade. -->
+    <spring-cloud.version>2023.0.3</spring-cloud.version>
   </properties>
 
   <dependencyManagement>
