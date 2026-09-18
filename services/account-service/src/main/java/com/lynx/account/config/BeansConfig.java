@@ -5,7 +5,9 @@ import com.lynx.account.projection.EventProjector;
 import com.lynx.account.projection.ProcessedEventMarkingRecoverer;
 import com.lynx.account.repository.AccountRepository;
 import com.lynx.account.repository.ProcessedEventRepository;
+import com.lynx.account.repository.SavedRecipientRepository;
 import com.lynx.account.service.AccountService;
+import com.lynx.account.service.RecipientService;
 import com.lynx.security.JwtVerifier;
 import com.lynx.security.ServiceTokenProvider;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -59,11 +61,20 @@ public class BeansConfig {
 
   @Bean
   public LedgerServiceClient ledgerServiceClient(
+      RestClient.Builder restClientBuilder,
       @Value("${lynx.clients.ledger-service.base-url}") String baseUrl,
       ServiceTokenProvider serviceTokenProvider) {
     CircuitBreaker circuitBreaker = CircuitBreaker.of("ledger-service", LEDGER_CIRCUIT_BREAKER_CONFIG);
+    // The INJECTED builder, not RestClient.builder() called directly —
+    // only the Spring-managed builder bean gets Spring Boot's automatic
+    // Micrometer Observation instrumentation (trace-context propagation:
+    // the current traceId/spanId written into the outgoing traceparent
+    // header). A bare RestClient.builder() call bypasses that entirely,
+    // silently starting a brand-new, disconnected trace on the receiving
+    // side instead of continuing this request's own — see
+    // docs/html/metrics_traces_logs/trace-propagation.html.
     return new LedgerServiceClient(
-        RestClient.builder().baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
+        restClientBuilder.baseUrl(baseUrl).build(), serviceTokenProvider, circuitBreaker);
   }
 
   @Bean
@@ -89,6 +100,11 @@ public class BeansConfig {
     return new AccountService(accountRepository, ledgerServiceClient);
   }
 
+  @Bean
+  public RecipientService recipientService(SavedRecipientRepository savedRecipientRepository) {
+    return new RecipientService(savedRecipientRepository);
+  }
+
   /**
    * "Cannot miss a message" — {@link
    * com.lynx.account.projection.OutboxEventConsumer#onMessage} no longer
@@ -112,12 +128,13 @@ public class BeansConfig {
    */
   @Bean
   public DefaultErrorHandler kafkaErrorHandler(KafkaOperations<Object, Object> kafkaOperations,
-                                                ProcessedEventRepository processedEventRepository) {
+                                                ProcessedEventRepository processedEventRepository,
+                                                TransactionTemplate transactionTemplate) {
     DeadLetterPublishingRecoverer deadLetterRecoverer = new DeadLetterPublishingRecoverer(kafkaOperations,
         (ConsumerRecord<?, ?> record, Exception ex) ->
             new org.apache.kafka.common.TopicPartition(record.topic() + ".DLT", record.partition()));
     ProcessedEventMarkingRecoverer recoverer =
-        new ProcessedEventMarkingRecoverer(deadLetterRecoverer, processedEventRepository);
+        new ProcessedEventMarkingRecoverer(deadLetterRecoverer, processedEventRepository, transactionTemplate);
     return new DefaultErrorHandler(recoverer, new FixedBackOff(1000L, 3));
   }
 }

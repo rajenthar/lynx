@@ -13,6 +13,40 @@ spring:
       port: 6379
   cloud:
     gateway:
+      # The frontend (lynx-dashboard, a Next.js dev server on its own port —
+      # 3000/3001/3002 depending on what's free) is a DIFFERENT origin from
+      # this gateway (8086) as far as a browser is concerned — every
+      # cross-origin request with a JSON body triggers a CORS PREFLIGHT
+      # (an OPTIONS request) first, which Spring Cloud Gateway rejects with
+      # a bare 403 unless a policy is explicitly configured here. Without
+      # this block, curl (which never sends a preflight) works fine while
+      # the exact same request from a real browser 403s — that mismatch IS
+      # the CORS preflight failing, not an auth or backend problem.
+      globalcors:
+        # Without this, Spring Cloud Gateway's own route-predicate handler
+        # mapping intercepts an OPTIONS preflight BEFORE the CORS filter
+        # ever gets a chance to answer it (no route's predicates include
+        # Method=OPTIONS, so it falls through to a bare 403) — this
+        # registers the CORS configuration on WebFlux's own
+        # SimpleUrlHandlerMapping too, which IS consulted early enough.
+        add-to-simple-url-handler-mapping: true
+        cors-configurations:
+          '[/**]':
+            # A pattern, not a fixed list — matches whatever port the
+            # frontend's dev server actually ends up on, without needing to
+            # hard-code 3000 vs 3001 vs 3002 here.
+            allowedOriginPatterns: "http://localhost:*"
+            allowedMethods: [GET, POST, PUT, DELETE, OPTIONS]
+            # Includes "authorization" (the Bearer token) and
+            # "idempotency-key" (the transfer page's own header) —
+            # deliberately "*" rather than naming each one, since a future
+            # page adding a new custom header shouldn't need this touched.
+            allowedHeaders: "*"
+            # No cookies/session anywhere in this project's auth model (a
+            # bearer token in a header, read/written by JS, not the
+            # browser's own cookie jar) — credentialed CORS is unnecessary
+            # complexity this project doesn't need.
+            allowCredentials: false
       # Applied to every route below, once, rather than repeated per
       # route — the same token-bucket limits for every
       # public endpoint today; a future route needing different limits
@@ -27,7 +61,7 @@ spring:
             # rateLimitKeyResolver bean (per-user, falling back to per-IP).
             key-resolver: "#{@rateLimitKeyResolver}"
       routes:
-        # Only register/login are truly public here — /auth/token
+        # Only these end-user auth endpoints are public here — /auth/token
         # (the Client Credentials grant) and /auth/.well-known/jwks.json
         # are both called service-to-service, directly against
         # auth-service's own port, never through this gateway.
@@ -36,11 +70,30 @@ spring:
           predicates:
             - Path=/auth/register
             - Method=POST
+        - id: auth-service-verify-otp
+          uri: http://localhost:8080
+          predicates:
+            - Path=/auth/verify-otp
+            - Method=POST
+        - id: auth-service-resend-otp
+          uri: http://localhost:8080
+          predicates:
+            - Path=/auth/resend-otp
+            - Method=POST
         - id: auth-service-login
           uri: http://localhost:8080
           predicates:
             - Path=/auth/login
             - Method=POST
+        # The one auth-service endpoint that DOES require a caller's own
+        # bearer JWT — verified by auth-service's own JwtAuthFilter, same
+        # as every other authenticated route below; the gateway itself
+        # still never inspects it (see RateLimitConfig's own note on this).
+        - id: auth-service-me
+          uri: http://localhost:8080
+          predicates:
+            - Path=/auth/me
+            - Method=GET,PATCH
 
         # /v1/accounts/** only — account-service's internal
         # /internal/accounts/resolve-transfer lives under a completely
@@ -50,6 +103,14 @@ spring:
           uri: http://localhost:8084
           predicates:
             - Path=/v1/accounts/**
+
+        # Same account-service instance, a separate end-user-facing path
+        # prefix — the saved-recipients address book (server-side, per
+        # user; replaced an earlier client-side/localStorage version).
+        - id: account-service-recipients
+          uri: http://localhost:8084
+          predicates:
+            - Path=/v1/recipients/**
 
         # The whole service — transaction-service has no internal-only
         # surface at all.

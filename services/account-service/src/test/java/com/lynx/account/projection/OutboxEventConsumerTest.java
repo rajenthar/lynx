@@ -3,6 +3,7 @@ package com.lynx.account.projection;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -110,13 +111,31 @@ class OutboxEventConsumerTest {
   @Test
   void propagatesWithoutAckingWhenThePayloadFailsToDecode() {
     when(processedEventRepository.existsById(9L)).thenReturn(false);
-    String message = "{\"id\":9,\"saga_id\":\"" + UUID.randomUUID() + "\",\"payload\":\"{}\"}";
+    // Genuinely malformed — NOT the "{}" placeholder, which is its own
+    // deliberate skip-case (see skipsAndAcksAPlaceholderPayloadWithoutDecoding).
+    String message = "{\"id\":9,\"saga_id\":\"" + UUID.randomUUID() + "\",\"payload\":\"not valid json\"}";
 
     assertThatThrownBy(() -> consumer.onMessage(message, ack))
         .isInstanceOf(RuntimeException.class);
 
     verify(ack, never()).acknowledge();
     verify(eventProjector, never()).apply(any());
+  }
+
+  @Test
+  void skipsAndAcksAPlaceholderPayloadWithoutDecoding() {
+    // The exact scenario discovered running this against a real Debezium
+    // instance: ledger-service's own OutboxEntry constructor default,
+    // captured as its own separate row-version change event — must be
+    // skipped, NEVER dead-lettered (which would poison this eventId's
+    // dedup entry before the real, later delivery arrives).
+    String message = "{\"id\":13,\"saga_id\":\"" + UUID.randomUUID() + "\",\"payload\":\"{}\"}";
+
+    consumer.onMessage(message, ack);
+
+    verify(ack).acknowledge();
+    verify(eventProjector, never()).apply(any());
+    verify(processedEventRepository, never()).existsById(anyLong());
   }
 
   @Test

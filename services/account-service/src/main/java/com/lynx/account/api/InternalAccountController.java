@@ -2,6 +2,7 @@ package com.lynx.account.api;
 
 import com.lynx.account.dto.AccountDtos.ResolveTransferRequest;
 import com.lynx.account.dto.AccountDtos.ResolvedTransferAccountsView;
+import com.lynx.account.dto.AccountDtos.SeedDefaultAccountRequest;
 import com.lynx.account.service.AccountService;
 import com.lynx.account.service.AccountService.ResolvedTransferAccounts;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -52,5 +53,17 @@ public class InternalAccountController {
         request.senderUserId(), request.senderCurrency(),
         request.recipientUserId(), request.recipientCurrency());
     return new ResolvedTransferAccountsView(resolved.senderAccountId(), resolved.recipientAccountId());
+  }
+
+  /**
+   * Called by auth-service right after a user completes OTP verification —
+   * see {@code AccountService.seedDefaultAccount}'s own javadoc for why
+   * this is deliberately idempotent rather than erroring on an existing
+   * account.
+   */
+  @RequiresInternalService
+  @PostMapping("/seed-default")
+  public void seedDefault(@RequestBody SeedDefaultAccountRequest request) {
+    accountService.seedDefaultAccount(request.userId());
   }
 }

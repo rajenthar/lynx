@@ -43,6 +43,10 @@ public final class AccountDtos {
   public record ResolvedTransferAccountsView(UUID senderAccountId, UUID recipientAccountId) {
   }
 
+  /** Called by auth-service right after OTP verification — see {@code AccountService.seedDefaultAccount}. */
+  public record SeedDefaultAccountRequest(String userId) {
+  }
+
   private AccountDtos() {
   }
 }

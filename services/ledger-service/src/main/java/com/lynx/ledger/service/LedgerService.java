@@ -303,12 +303,15 @@ public class LedgerService {
         applyBalanceDeltas(legs);
         withinTransaction.run();
 
-        // The outbox row's own generated id IS the envelope's eventId (see
-        // OutboxEntry javadoc), so it must be flushed before the payload can
-        // be encoded. eventType comes straight from the event itself — never
-        // a separately hand-typed string that could drift out of sync.
+        // The outbox row's own id IS the envelope's eventId (see OutboxEntry
+        // javadoc), so it must be known before the payload can be encoded —
+        // SEQUENCE generation assigns it right here, on save(), WITHOUT
+        // needing an actual INSERT round-trip yet (unlike the IDENTITY
+        // strategy this used to use). eventType comes straight from the
+        // event itself — never a separately hand-typed string that could
+        // drift out of sync.
         OutboxEntry outboxEntry = new OutboxEntry(sagaId, userId, event.eventType().name());
-        outboxEntry = outboxEntryRepository.saveAndFlush(outboxEntry);
+        outboxEntry = outboxEntryRepository.save(outboxEntry);
 
         // ADR-004: correlationId is for TRACING only, never idempotency —
         // it must be the request's own correlation id, never sagaId itself.
@@ -319,8 +322,11 @@ public class LedgerService {
             .orElseGet(() -> UUID.randomUUID().toString());
         EventEnvelope<DomainEvent> envelope = EventEnvelope.of(
             outboxEntry.getId(), sagaId, correlationId, event);
+        // Not yet flushed — this and the save() above collapse into ONE
+        // single INSERT at transaction commit (see OutboxEntry's own
+        // javadoc for why a second, separate write here would be a real
+        // CDC correctness bug, not just an extra round trip).
         outboxEntry.setPayload(EventCodec.encode(envelope));
-        outboxEntryRepository.save(outboxEntry);
 
         log.info("Wrote {} leg(s) for saga {} ({}), outbox eventId={}",
             saved.size(), sagaId, event.eventType(), outboxEntry.getId());

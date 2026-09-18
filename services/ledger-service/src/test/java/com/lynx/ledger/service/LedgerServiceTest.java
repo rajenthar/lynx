@@ -74,13 +74,19 @@ class LedgerServiceTest {
       return legs;
     });
 
+    // Mimics SEQUENCE generation's real behavior: the id is assigned on the
+    // FIRST save() (see OutboxEntry's own javadoc for why this changed from
+    // IDENTITY + saveAndFlush) — every subsequent save of the SAME
+    // already-id'd entity (e.g. after setPayload) is a no-op here, matching
+    // how Hibernate never re-assigns an id an entity already has.
     AtomicLong outboxSeq = new AtomicLong(1);
-    when(outboxEntryRepository.saveAndFlush(any())).thenAnswer(inv -> {
+    when(outboxEntryRepository.save(any())).thenAnswer(inv -> {
       OutboxEntry entry = inv.getArgument(0);
-      setId(entry, outboxSeq.getAndIncrement());
+      if (entry.getId() == null) {
+        setId(entry, outboxSeq.getAndIncrement());
+      }
       return entry;
     });
-    when(outboxEntryRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
     // A real (trivial) subclass, not a Mockito mock — TransactionTemplate is
     // a concrete class, and this JDK's Mockito inline mock maker can't
@@ -160,7 +166,7 @@ class LedgerServiceTest {
     // separately proven, against real Postgres, by
     // concurrentHoldsOnTheSameAccountNeverBothSucceed), but never reaching
     // the outbox write IS something this mock reflects correctly.
-    verify(outboxEntryRepository, never()).saveAndFlush(any());
+    verify(outboxEntryRepository, never()).save(any());
   }
 
   @Test

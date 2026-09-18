@@ -35,7 +35,7 @@ lynx:
   service-token:
     token-endpoint: http://localhost:8080/auth/token
     client-id: transaction-service
-    client-secret: placeholder-not-a-real-secret
+    client-secret: ${LYNX_SERVICE_CLIENT_SECRET:placeholder-not-a-real-secret}
   clients:
     saga-orchestrator:
       base-url: http://localhost:8083

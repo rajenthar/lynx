@@ -11,6 +11,28 @@ public final class AuthDtos {
   public record LoginRequest(String email, String password) {
   }
 
+  public record VerifyOtpRequest(String email, String code) {
+  }
+
+  public record ResendOtpRequest(String email) {
+  }
+
+  /**
+   * Both {@code newName} and {@code newPassword} are optional (leave one
+   * null/blank to only change the other) but {@code currentPassword} is
+   * always required — it's checked before anything is updated.
+   */
+  public record ChangeDetailsRequest(String currentPassword, String newName, String newPassword) {
+  }
+
+  /** Returned by {@code /auth/register} — no token yet, the account is unverified. */
+  public record RegisterResponse(String userId, String email, String message) {
+  }
+
+  /** {@code /auth/me} — this service's own answer to "who am I", for the frontend's profile page. */
+  public record UserProfileView(String userId, String email, String name, boolean emailVerified) {
+  }
+
   /**
    * OAuth2's exact field naming (RFC 6749 §5.1) for both
    * {@code /auth/token}'s response and {@code /auth/login}/

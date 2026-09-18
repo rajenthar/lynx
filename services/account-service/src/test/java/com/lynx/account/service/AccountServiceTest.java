@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.lynx.account.client.LedgerServiceClient;
@@ -68,6 +69,16 @@ class AccountServiceTest {
   void createAccountRejectsAnUnknownCurrency() {
     assertThatThrownBy(() -> accountService.createAccount("user-1", "NOT_A_CURRENCY"))
         .isInstanceOf(Exception.class);
+  }
+
+  @Test
+  void createAccountRejectsARealButUnsupportedCurrency() {
+    // JPY is a genuine ISO-4217 code (Money.currencyOf accepts it) but not
+    // one of the currencies Lynx actually supports (SupportedCurrencies) —
+    // this is the narrower business check, not the ISO-validity check
+    // covered by createAccountRejectsAnUnknownCurrency above.
+    assertThatThrownBy(() -> accountService.createAccount("user-1", "JPY"))
+        .isInstanceOf(com.lynx.common.error.ValidationException.class);
   }
 
   @Test
@@ -228,5 +239,33 @@ class AccountServiceTest {
     assertThatThrownBy(() -> accountService.resolveTransferAccounts("user-1", "SGD", "recipient-1", "USD"))
         .isInstanceOf(NotFoundException.class)
         .hasMessageContaining("Recipient");
+  }
+
+  @Test
+  void listSupportedCurrenciesMatchesTheWhitelist() {
+    assertThat(accountService.listSupportedCurrencies())
+        .containsExactly("SGD", "USD", "EUR", "GBP");
+  }
+
+  @Test
+  void seedDefaultAccountCreatesAnSgdAccountWhenTheUserHasNone() {
+    when(accountRepository.findByUserIdAndCurrency("user-1", "SGD")).thenReturn(Optional.empty());
+
+    accountService.seedDefaultAccount("user-1");
+
+    var captor = org.mockito.ArgumentCaptor.forClass(Account.class);
+    verify(accountRepository).save(captor.capture());
+    assertThat(captor.getValue().getUserId()).isEqualTo("user-1");
+    assertThat(captor.getValue().getCurrency()).isEqualTo("SGD");
+  }
+
+  @Test
+  void seedDefaultAccountIsANoOpWhenTheUserAlreadyHasAnSgdAccount() {
+    Account existing = new Account(UUID.randomUUID(), "user-1", "SGD", Instant.now());
+    when(accountRepository.findByUserIdAndCurrency("user-1", "SGD")).thenReturn(Optional.of(existing));
+
+    accountService.seedDefaultAccount("user-1");
+
+    verify(accountRepository, org.mockito.Mockito.never()).save(any());
   }
 }

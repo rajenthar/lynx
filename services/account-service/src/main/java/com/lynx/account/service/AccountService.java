@@ -11,6 +11,7 @@ import com.lynx.common.error.ErrorCode;
 import com.lynx.common.error.NotFoundException;
 import com.lynx.common.error.ValidationException;
 import com.lynx.money.Money;
+import com.lynx.money.SupportedCurrencies;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -43,6 +44,15 @@ public class AccountService {
     // ISO-4217 code and throws on anything else, so no separate case
     // normalization is needed here.
     String currency = Money.currencyOf(currencyCode).getCurrencyCode();
+    // A NARROWER check than Money.currencyOf above — that only proves the
+    // code is a REAL ISO-4217 currency (so "JPY" passes it), not that Lynx
+    // actually supports it. SupportedCurrencies is the smaller business
+    // whitelist fx-rate-service has real quotes for (see its own javadoc).
+    if (!SupportedCurrencies.isSupported(currency)) {
+      throw new ValidationException(
+          "Unsupported currency: " + currency + " — supported currencies are "
+              + SupportedCurrencies.CODES);
+    }
     if (accountRepository.findByUserIdAndCurrency(userId, currency).isPresent()) {
       throw new ConflictException(
           "An account in " + currency + " already exists for this user");
@@ -58,6 +68,35 @@ public class AccountService {
       // friendly 409 shape as the common (non-racing) case above.
       throw new ConflictException(
           "An account in " + currency + " already exists for this user");
+    }
+  }
+
+  /** The currencies a new account (or a transfer) may be denominated in. */
+  public List<String> listSupportedCurrencies() {
+    return SupportedCurrencies.CODES;
+  }
+
+  /**
+   * Called by auth-service right after a user completes OTP verification
+   * (see {@code AccountServiceClient}/{@code InternalAccountController}'s
+   * own javadoc) — every new user gets a starter SGD account so the
+   * dashboard is never just an empty state. Deliberately idempotent and
+   * silent on an existing account rather than throwing {@link
+   * ConflictException}: this can legitimately be called more than once for
+   * the same user (auth-service's own call is best-effort/retryable, and a
+   * re-registration of a still-unverified email re-triggers verification),
+   * and "the user already has an SGD account" is exactly the desired end
+   * state either way, not an error.
+   */
+  public void seedDefaultAccount(String userId) {
+    String defaultCurrency = SupportedCurrencies.CODES.get(0);
+    if (accountRepository.findByUserIdAndCurrency(userId, defaultCurrency).isPresent()) {
+      return;
+    }
+    try {
+      accountRepository.save(new Account(UUID.randomUUID(), userId, defaultCurrency, Instant.now()));
+    } catch (org.springframework.dao.DataIntegrityViolationException e) {
+      // Same race as createAccount above — another call already won.
     }
   }
 
@@ -87,6 +126,17 @@ public class AccountService {
 
   public Account getAccount(UUID accountId, String userId) {
     return getOwnedAccount(accountId, userId);
+  }
+
+  /**
+   * Verifies the caller actually owns {@code accountId} BEFORE ever calling
+   * ledger-service — see {@code LedgerServiceClient.history}'s javadoc for
+   * why this ownership check can only live here, not in ledger-service
+   * itself.
+   */
+  public List<LedgerServiceClient.HistoryEntry> getAccountHistory(UUID accountId, String userId, int limit) {
+    getOwnedAccount(accountId, userId);
+    return ledgerServiceClient.history(accountId, limit);
   }
 
   public List<Account> listAccounts(String userId) {

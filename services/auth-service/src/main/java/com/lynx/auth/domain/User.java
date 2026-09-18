@@ -9,8 +9,8 @@ import java.util.UUID;
 
 /**
  * A registered end user — email + BCrypt password
- * hash + a display name, nothing more. No profile, no phone, no email
- * verification — this is a login, not an account/profile service.
+ * hash + a display name + whether the email has been OTP-verified. No
+ * profile, no phone — this is a login, not a full profile service.
  *
  * <p>{@code id} is this user's {@code userId} everywhere else in Lynx — the
  * same value {@link com.lynx.auth.service.JwtIssuer} puts in a minted
@@ -33,6 +33,9 @@ public class User {
   @Column(name = "password_hash", nullable = false)
   private String passwordHash;
 
+  @Column(name = "email_verified", nullable = false)
+  private boolean emailVerified;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
 
@@ -48,7 +51,35 @@ public class User {
     this.email = email;
     this.name = name;
     this.passwordHash = passwordHash;
+    this.emailVerified = false;
     this.createdAt = now;
+    this.updatedAt = now;
+  }
+
+  public void markEmailVerified(Instant now) {
+    this.emailVerified = true;
+    this.updatedAt = now;
+  }
+
+  /**
+   * Re-registration of a still-unverified account (see {@code
+   * UserAuthService.register}'s own javadoc) — overwrites name and password
+   * with the newly submitted values, exactly as if this were a brand-new
+   * signup, since nothing about the old attempt was ever confirmed.
+   */
+  public void updateRegistrationDetails(String name, String passwordHash, Instant now) {
+    this.name = name;
+    this.passwordHash = passwordHash;
+    this.updatedAt = now;
+  }
+
+  public void changeName(String name, Instant now) {
+    this.name = name;
+    this.updatedAt = now;
+  }
+
+  public void changePassword(String passwordHash, Instant now) {
+    this.passwordHash = passwordHash;
     this.updatedAt = now;
   }
 
@@ -66,6 +97,10 @@ public class User {
 
   public String getPasswordHash() {
     return passwordHash;
+  }
+
+  public boolean isEmailVerified() {
+    return emailVerified;
   }
 
   public Instant getCreatedAt() {
