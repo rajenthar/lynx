@@ -57,7 +57,8 @@ public class LedgerServiceClient {
     try {
       token = tokenProvider.currentToken();
     } catch (CallNotPermittedException | ServiceTokenException e) {
-      throw new LedgerUnavailableException("Could not obtain a service token: " + e.getMessage(), e);
+      log.error("Could not obtain a service token for ledger-service call", e);
+      throw new LedgerUnavailableException("ledger-service is temporarily unavailable — please retry", e);
     }
     Map<String, Object> body = Map.of(
         "accountId", accountId,
@@ -72,14 +73,14 @@ public class LedgerServiceClient {
           .retrieve()
           .toBodilessEntity());
     } catch (CallNotPermittedException e) {
-      throw new LedgerUnavailableException("Circuit open for ledger-service: " + e.getMessage(), e);
+      throw new LedgerUnavailableException("ledger-service is temporarily unavailable — please retry", e);
     } catch (HttpClientErrorException e) {
       // A genuine rejection (e.g. malformed request) — not transient, the
       // caller (AccountService) surfaces this as a real failure, not a retry.
       throw new LedgerRejectedException(e.getMessage());
     } catch (HttpServerErrorException | ResourceAccessException e) {
       log.warn("ledger-service deposit call failed for depositId={}", depositId, e);
-      throw new LedgerUnavailableException("Downstream call failed: " + e.getMessage(), e);
+      throw new LedgerUnavailableException("ledger-service is temporarily unavailable — please retry", e);
     }
   }
 
@@ -98,7 +99,8 @@ public class LedgerServiceClient {
     try {
       token = tokenProvider.currentToken();
     } catch (CallNotPermittedException | ServiceTokenException e) {
-      throw new LedgerUnavailableException("Could not obtain a service token: " + e.getMessage(), e);
+      log.error("Could not obtain a service token for ledger-service call", e);
+      throw new LedgerUnavailableException("ledger-service is temporarily unavailable — please retry", e);
     }
     try {
       return circuitBreaker.executeSupplier(() -> restClient.get()
@@ -107,10 +109,10 @@ public class LedgerServiceClient {
           .retrieve()
           .body(new ParameterizedTypeReference<List<HistoryEntry>>() { }));
     } catch (CallNotPermittedException e) {
-      throw new LedgerUnavailableException("Circuit open for ledger-service: " + e.getMessage(), e);
+      throw new LedgerUnavailableException("ledger-service is temporarily unavailable — please retry", e);
     } catch (HttpServerErrorException | ResourceAccessException e) {
       log.warn("ledger-service history call failed for accountId={}", accountId, e);
-      throw new LedgerUnavailableException("Downstream call failed: " + e.getMessage(), e);
+      throw new LedgerUnavailableException("ledger-service is temporarily unavailable — please retry", e);
     }
   }
 
