@@ -12,7 +12,7 @@
 
   <name>Lynx — Multi-Currency Ledger Engine</name>
   <description>Production-grade multi-currency ledger with 3-step saga orchestration, event-driven CQRS, and distributed tracing</description>
-  <url>https://github.com/rajenthar/portfolio/tree/main/lynx</url>
+  <url>https://github.com/rajenthar/lynx</url>
 
   <!-- SHARED LIBRARIES (6 modules) -->
   <modules>
