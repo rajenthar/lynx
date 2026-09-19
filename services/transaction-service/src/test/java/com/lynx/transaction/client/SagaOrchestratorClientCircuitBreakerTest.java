@@ -65,7 +65,8 @@ class SagaOrchestratorClientCircuitBreakerTest {
     assertThatThrownBy(() -> createSaga(client)).isInstanceOf(DownstreamUnavailableException.class);
     assertThatThrownBy(() -> createSaga(client))
         .isInstanceOf(DownstreamUnavailableException.class)
-        .hasMessageContaining("Circuit open");
+        .cause()
+        .isInstanceOf(io.github.resilience4j.circuitbreaker.CallNotPermittedException.class);
 
     mockServer.verify();
   }
