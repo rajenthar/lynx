@@ -81,7 +81,8 @@ class LedgerServiceClientCircuitBreakerTest {
     // confirms only the two expectations above were ever actually called.
     assertThatThrownBy(() -> client.hold(UUID.randomUUID(), "user-1", UUID.randomUUID(), new BigDecimal("100.00"), "SGD"))
         .isInstanceOf(DownstreamUnavailableException.class)
-        .hasMessageContaining("Circuit open");
+        .cause()
+        .isInstanceOf(io.github.resilience4j.circuitbreaker.CallNotPermittedException.class);
 
     mockServer.verify();
   }
