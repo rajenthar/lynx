@@ -173,6 +173,12 @@ public class AccountService {
         .orElseThrow(() -> new NotFoundException(
             "Recipient has no " + recipientCurrency + " account: userId=" + recipientUserId));
 
+    if (senderAccountId.equals(recipientAccountId)) {
+      // Same user, same currency — a transfer here would just move money
+      // between the sender's own account and itself.
+      throw new ValidationException("Cannot transfer to your own account");
+    }
+
     return new ResolvedTransferAccounts(senderAccountId, recipientAccountId);
   }
 

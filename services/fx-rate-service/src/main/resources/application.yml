@@ -41,6 +41,19 @@ spring:
     baseline-version: "0"
 
 management:
+  tracing:
+    sampling:
+      probability: ${OTEL_TRACE_SAMPLING:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+      headers:
+        Authorization: ${OTEL_EXPORTER_OTLP_AUTH_HEADER:}
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        headers:
+          Authorization: ${OTEL_EXPORTER_OTLP_AUTH_HEADER:}
   endpoints:
     web:
       exposure:

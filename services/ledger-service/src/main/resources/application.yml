@@ -45,13 +45,17 @@ spring:
 management:
   tracing:
     sampling:
-      probability: 1.0   # trace every request locally; production would sample down
+      probability: ${OTEL_TRACE_SAMPLING:1.0}   # trace every request locally; production would sample down
   otlp:
     tracing:
-      endpoint: http://localhost:4318/v1/traces
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+      headers:
+        Authorization: ${OTEL_EXPORTER_OTLP_AUTH_HEADER:}
     metrics:
       export:
-        url: http://localhost:4318/v1/metrics
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        headers:
+          Authorization: ${OTEL_EXPORTER_OTLP_AUTH_HEADER:}
   endpoints:
     web:
       exposure:

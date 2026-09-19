@@ -116,10 +116,17 @@ function TransferContent() {
     setSaved(await removeRecipient(id));
   }
 
+  const fromAccount = accounts.find((a) => a.currency === fromCurrency);
+  const fromBalanceZero = fromAccount != null && Number(fromAccount.available) <= 0;
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setStatus(null);
+    if (fromBalanceZero) {
+      setError(`Your ${fromCurrency} account has no available balance.`);
+      return;
+    }
     setSubmitting(true);
     try {
       const idempotencyKey = crypto.randomUUID();
@@ -270,8 +277,8 @@ function TransferContent() {
             />
           </label>
           <ErrorText message={error} />
-          <SubmitButton disabled={submitting}>
-            {submitting ? "Sending…" : "Send transfer"}
+          <SubmitButton disabled={submitting || fromBalanceZero}>
+            {submitting ? "Sending…" : fromBalanceZero ? "No available balance" : "Send transfer"}
           </SubmitButton>
         </form>
       )}
