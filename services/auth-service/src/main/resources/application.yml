@@ -70,7 +70,7 @@ lynx:
     # This service verifying its OWN tokens for /auth/me — same JWKS
     # endpoint every other service already fetches from, just looped back
     # to itself instead of a remote host.
-    jwks-url: http://localhost:8080/auth/.well-known/jwks.json
+    jwks-url: ${AUTH_SERVICE_URL:http://localhost:8080}/auth/.well-known/jwks.json
     issuer: https://auth.lynx
     audience: lynx-api
   clients:
@@ -81,7 +81,7 @@ lynx:
     # endpoint like every other caller does), so unlike ledger-service's
     # client there's no separate client-id/client-secret pair here.
     account-service:
-      base-url: http://localhost:8084
+      base-url: ${ACCOUNT_SERVICE_URL:http://localhost:8084}
 
 management:
   tracing:
