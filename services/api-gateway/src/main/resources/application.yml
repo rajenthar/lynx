@@ -9,8 +9,15 @@ spring:
       # Same Redis instance lynx-idempotency's own RedisIdempotencyCache
       # already uses elsewhere in this project — no new infrastructure,
       # just the reactive driver instead of the blocking Jedis one.
-      host: localhost
-      port: 6379
+      # Spring Boot's own auto-configured LettuceConnectionFactory already
+      # supports password/ssl natively — no code change needed here,
+      # unlike ledger-service's hand-rolled JedisPool. See
+      # configs/upstash/README.md for production values.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
   cloud:
     gateway:
       # The frontend (lynx-dashboard, a Next.js dev server on its own port —

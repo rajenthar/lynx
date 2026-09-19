@@ -8,7 +8,10 @@ spring:
     # Same shared local Postgres as every other service (infra's
     # lynx-postgres container, port 5433) — this service owns its own
     # tables (users, service_clients) within it.
-    url: jdbc:postgresql://localhost:5433/lynx
+    # ${DB_URL:default} — production points this at a POOLED connection
+    # (e.g. Neon's pgbouncer endpoint); see configs/neon/README.md for why
+    # this must NOT be the same endpoint Flyway uses below.
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/lynx}
     # Local dev only ever needs the default — DB_USERNAME/DB_PASSWORD are
     # what get set for real everywhere else (a deployed environment's own
     # secret store, or a cloud platform's env var UI), never committed with
@@ -21,6 +24,13 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+    # A SEPARATE, direct (non-pooled) connection for Flyway specifically —
+    # its own migration lock is a PostgreSQL advisory lock, which needs
+    # session-level semantics a transaction-pooled connection doesn't
+    # provide. Falls back to DB_URL itself if DB_FLYWAY_URL isn't set.
+    url: ${DB_FLYWAY_URL:${spring.datasource.url}}
+    user: ${DB_USERNAME:lynx}
+    password: ${DB_PASSWORD:lynx}
     # Every service shares ONE Postgres database (see datasource note above)
     # but Flyway's default history table name is the same for everyone —
     # without a per-service name here, this service's "version 1" collides

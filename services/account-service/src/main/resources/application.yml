@@ -5,7 +5,12 @@ spring:
   application:
     name: account-service
   datasource:
-    url: jdbc:postgresql://localhost:5433/lynx
+    # ${DB_URL:default} — production points this at a POOLED connection
+    # (e.g. Neon's pgbouncer endpoint), since this is the datasource
+    # HikariCP draws many short-lived connections from. See
+    # configs/neon/README.md for why this must NOT be the same endpoint
+    # Flyway uses below.
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/lynx}
     username: ${DB_USERNAME:lynx}
     password: ${DB_PASSWORD:lynx}
   jpa:
@@ -14,6 +19,18 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+    # A SEPARATE, direct (non-pooled) connection for Flyway specifically —
+    # Spring Boot's FlywayAutoConfiguration builds its own datasource from
+    # spring.flyway.* when these are set, rather than reusing the primary
+    # datasource above. Needed because Flyway's own migration lock is a
+    # PostgreSQL advisory lock, which requires session-level semantics a
+    # transaction-pooled connection (e.g. Neon's pgbouncer) doesn't
+    # provide. Falls back to DB_URL itself if DB_FLYWAY_URL isn't set (so
+    # local dev, which has neither, still points at the same single local
+    # Postgres either way).
+    url: ${DB_FLYWAY_URL:${spring.datasource.url}}
+    user: ${DB_USERNAME:lynx}
+    password: ${DB_PASSWORD:lynx}
     # Every service shares ONE Postgres database but Flyway's default
     # history table name is the same for everyone — without a per-service
     # name here, this service's "version 1" collides with every OTHER
