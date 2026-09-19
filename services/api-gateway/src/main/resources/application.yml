@@ -73,22 +73,22 @@ spring:
         # are both called service-to-service, directly against
         # auth-service's own port, never through this gateway.
         - id: auth-service-register
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/register
             - Method=POST
         - id: auth-service-verify-otp
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/verify-otp
             - Method=POST
         - id: auth-service-resend-otp
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/resend-otp
             - Method=POST
         - id: auth-service-login
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/login
             - Method=POST
@@ -97,7 +97,7 @@ spring:
         # as every other authenticated route below; the gateway itself
         # still never inspects it (see RateLimitConfig's own note on this).
         - id: auth-service-me
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/me
             - Method=GET,PATCH
@@ -107,7 +107,7 @@ spring:
         # different path prefix, so it's never matched by this predicate
         # at all; no explicit exclusion rule needed.
         - id: account-service
-          uri: http://localhost:8084
+          uri: ${ACCOUNT_SERVICE_URL:http://localhost:8084}
           predicates:
             - Path=/v1/accounts/**
 
@@ -115,14 +115,14 @@ spring:
         # prefix — the saved-recipients address book (server-side, per
         # user; replaced an earlier client-side/localStorage version).
         - id: account-service-recipients
-          uri: http://localhost:8084
+          uri: ${ACCOUNT_SERVICE_URL:http://localhost:8084}
           predicates:
             - Path=/v1/recipients/**
 
         # The whole service — transaction-service has no internal-only
         # surface at all.
         - id: transaction-service
-          uri: http://localhost:8085
+          uri: ${TRANSACTION_SERVICE_URL:http://localhost:8085}
           predicates:
             - Path=/v1/transfers/**
 
