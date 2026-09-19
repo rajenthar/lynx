@@ -44,7 +44,17 @@ spring:
     # never actually get created.
     baseline-version: "0"
   kafka:
-    bootstrap-servers: localhost:19092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
+    properties:
+      # Empty (PLAINTEXT) by default — local dev's Redpanda has no auth.
+      # Production (Aiven) requires mutual TLS: see configs/kafka/README.md
+      # for why PEM (not a keytool/PKCS12 conversion) is the simplest path.
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+      ssl.truststore.type: PEM
+      ssl.truststore.certificates: ${KAFKA_CA_PEM:}
+      ssl.keystore.type: PEM
+      ssl.keystore.key: ${KAFKA_SERVICE_KEY:}
+      ssl.keystore.certificate.chain: ${KAFKA_SERVICE_CERT:}
     consumer:
       group-id: account-service
       # Rebuild the WHOLE projection from history on a fresh instance
@@ -72,13 +82,17 @@ spring:
 management:
   tracing:
     sampling:
-      probability: 1.0
+      probability: ${OTEL_TRACE_SAMPLING:1.0}
   otlp:
     tracing:
-      endpoint: http://localhost:4318/v1/traces
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+      headers:
+        Authorization: ${OTEL_EXPORTER_OTLP_AUTH_HEADER:}
     metrics:
       export:
-        url: http://localhost:4318/v1/metrics
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        headers:
+          Authorization: ${OTEL_EXPORTER_OTLP_AUTH_HEADER:}
   endpoints:
     web:
       exposure:

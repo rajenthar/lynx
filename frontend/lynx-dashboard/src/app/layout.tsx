@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://lynx.rajenthar.dev"),
   title: "Lynx",
   description: "A multi-currency ledger — accounts, deposits, transfers.",
 };
