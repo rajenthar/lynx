@@ -14,7 +14,13 @@
   <description>Production-grade multi-currency ledger with 3-step saga orchestration, event-driven CQRS, and distributed tracing</description>
   <url>https://github.com/rajenthar/lynx</url>
 
-  <!-- SHARED LIBRARIES (6 modules) -->
+  <!-- SHARED LIBRARIES (6 modules) + the 7 services that actually have
+       real code today. Every other service under services/ (notification,
+       reconciliation, reporting, audit, admin, kyc, reference-data, fee,
+       settlement, scheduler, config, fraud-detection, limits) is still
+       just an empty placeholder directory from early scaffolding — no
+       pom.xml, nothing tracked by git — add it back here only once it
+       actually has a real module in it. -->
   <modules>
     <!-- Foundation -->
     <module>shared/lynx-common</module>
@@ -24,14 +30,9 @@
     <module>shared/lynx-events</module>
     <module>shared/lynx-telemetry</module>
 
-    <!-- PHASE 1: CORE SERVICES (15 modules) -->
     <!-- Edge -->
     <module>services/api-gateway</module>
     <module>services/auth-service</module>
-
-    <!-- Pre-flight checks -->
-    <module>services/fraud-detection-service</module>
-    <module>services/limits-service</module>
 
     <!-- Orchestration -->
     <module>services/transaction-service</module>
@@ -41,21 +42,6 @@
     <module>services/ledger-service</module>
     <module>services/account-service</module>
     <module>services/fx-rate-service</module>
-
-    <!-- Downstream consumers -->
-    <module>services/notification-service</module>
-    <module>services/reconciliation-service</module>
-    <module>services/reporting-service</module>
-    <module>services/audit-service</module>
-    <module>services/admin-service</module>
-
-    <!-- PHASE 2: PLANNED SERVICES (6 modules - skeleton only) -->
-    <module>services/kyc-service</module>
-    <module>services/reference-data-service</module>
-    <module>services/fee-service</module>
-    <module>services/settlement-service</module>
-    <module>services/scheduler-service</module>
-    <module>services/config-service</module>
   </modules>
 
   <properties>
