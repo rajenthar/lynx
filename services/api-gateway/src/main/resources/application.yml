@@ -39,10 +39,13 @@ spring:
         add-to-simple-url-handler-mapping: true
         cors-configurations:
           '[/**]':
-            # A pattern, not a fixed list — matches whatever port the
-            # frontend's dev server actually ends up on, without needing to
-            # hard-code 3000 vs 3001 vs 3002 here.
-            allowedOriginPatterns: "http://localhost:*"
+            # Local dev: matches whatever port the frontend's dev server
+            # actually ends up on (3000/3001/3002), without hard-coding one.
+            # Production overrides this via FRONTEND_ORIGIN to the real
+            # Vercel-hosted domain (https://lynx.rajenthar.dev) — a browser
+            # preflight from that origin would otherwise 403 even though
+            # curl (no preflight) works fine, same trap as the comment above.
+            allowedOriginPatterns: "${FRONTEND_ORIGIN:http://localhost:*}"
             allowedMethods: [GET, POST, PUT, DELETE, OPTIONS]
             # Includes "authorization" (the Bearer token) and
             # "idempotency-key" (the transfer page's own header) —
