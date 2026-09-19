@@ -90,19 +90,19 @@ logging:
 
 lynx:
   security:
-    jwks-url: http://localhost:8080/auth/.well-known/jwks.json
+    jwks-url: ${AUTH_SERVICE_URL:http://localhost:8080}/auth/.well-known/jwks.json
     issuer: https://auth.lynx
     audience: lynx-api
   # ADR-007: this service's OWN identity when calling ledger-service's
   # deposit endpoint. Seeded into auth-service's service_clients table at
   # ITS startup — see auth-service's ServiceClientSeeder.
   service-token:
-    token-endpoint: http://localhost:8080/auth/token
+    token-endpoint: ${AUTH_SERVICE_URL:http://localhost:8080}/auth/token
     client-id: account-service
     client-secret: ${LYNX_SERVICE_CLIENT_SECRET:placeholder-not-a-real-secret}
   clients:
     ledger-service:
-      base-url: http://localhost:8081
+      base-url: ${LEDGER_SERVICE_URL:http://localhost:8081}
   kafka:
     # The topic Debezium's connector produces to (topic.prefix=lynx,
     # schema=public, table=outbox) — see infra/debezium/ledger-outbox-connector.json.
