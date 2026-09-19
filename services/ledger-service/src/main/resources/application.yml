@@ -10,7 +10,10 @@ spring:
     # silently receive this connection instead of infra's lynx-postgres
     # container. infra/docker-compose.local.yml's postgres service is
     # started with POSTGRES_PORT=5433 to avoid that collision.
-    url: jdbc:postgresql://localhost:5433/lynx
+    # ${DB_URL:default} — production points this at a POOLED connection
+    # (e.g. Neon's pgbouncer endpoint); see configs/neon/README.md for why
+    # this must NOT be the same endpoint Flyway uses below.
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/lynx}
     username: ${DB_USERNAME:lynx}
     password: ${DB_PASSWORD:lynx}
   jpa:
@@ -19,6 +22,13 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+    # A SEPARATE, direct (non-pooled) connection for Flyway specifically —
+    # its own migration lock is a PostgreSQL advisory lock, which needs
+    # session-level semantics a transaction-pooled connection doesn't
+    # provide. Falls back to DB_URL itself if DB_FLYWAY_URL isn't set.
+    url: ${DB_FLYWAY_URL:${spring.datasource.url}}
+    user: ${DB_USERNAME:lynx}
+    password: ${DB_PASSWORD:lynx}
     # Every service shares ONE Postgres database but Flyway's default
     # history table name is the same for everyone — without a per-service
     # name here, this service's "version 1" collides with every OTHER
@@ -64,6 +74,10 @@ lynx:
     issuer: https://auth.lynx
     audience: lynx-api
   redis:
-    # infra/docker-compose.local.yml's lynx-redis container, default port.
-    host: localhost
-    port: 6379
+    # infra/docker-compose.local.yml's lynx-redis container, default port,
+    # no auth, no TLS. Production (Upstash) needs all four overridden —
+    # see configs/upstash/README.md.
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    ssl: ${REDIS_SSL:false}

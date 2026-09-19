@@ -9,8 +9,15 @@ spring:
       # Same Redis instance lynx-idempotency's own RedisIdempotencyCache
       # already uses elsewhere in this project — no new infrastructure,
       # just the reactive driver instead of the blocking Jedis one.
-      host: localhost
-      port: 6379
+      # Spring Boot's own auto-configured LettuceConnectionFactory already
+      # supports password/ssl natively — no code change needed here,
+      # unlike ledger-service's hand-rolled JedisPool. See
+      # configs/upstash/README.md for production values.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
   cloud:
     gateway:
       # The frontend (lynx-dashboard, a Next.js dev server on its own port —
@@ -32,10 +39,13 @@ spring:
         add-to-simple-url-handler-mapping: true
         cors-configurations:
           '[/**]':
-            # A pattern, not a fixed list — matches whatever port the
-            # frontend's dev server actually ends up on, without needing to
-            # hard-code 3000 vs 3001 vs 3002 here.
-            allowedOriginPatterns: "http://localhost:*"
+            # Local dev: matches whatever port the frontend's dev server
+            # actually ends up on (3000/3001/3002), without hard-coding one.
+            # Production overrides this via FRONTEND_ORIGIN to the real
+            # Vercel-hosted domain (https://lynx.rajenthar.dev) — a browser
+            # preflight from that origin would otherwise 403 even though
+            # curl (no preflight) works fine, same trap as the comment above.
+            allowedOriginPatterns: "${FRONTEND_ORIGIN:http://localhost:*}"
             allowedMethods: [GET, POST, PUT, DELETE, OPTIONS]
             # Includes "authorization" (the Bearer token) and
             # "idempotency-key" (the transfer page's own header) —
@@ -66,22 +76,22 @@ spring:
         # are both called service-to-service, directly against
         # auth-service's own port, never through this gateway.
         - id: auth-service-register
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/register
             - Method=POST
         - id: auth-service-verify-otp
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/verify-otp
             - Method=POST
         - id: auth-service-resend-otp
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/resend-otp
             - Method=POST
         - id: auth-service-login
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/login
             - Method=POST
@@ -90,7 +100,7 @@ spring:
         # as every other authenticated route below; the gateway itself
         # still never inspects it (see RateLimitConfig's own note on this).
         - id: auth-service-me
-          uri: http://localhost:8080
+          uri: ${AUTH_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/auth/me
             - Method=GET,PATCH
@@ -100,7 +110,7 @@ spring:
         # different path prefix, so it's never matched by this predicate
         # at all; no explicit exclusion rule needed.
         - id: account-service
-          uri: http://localhost:8084
+          uri: ${ACCOUNT_SERVICE_URL:http://localhost:8084}
           predicates:
             - Path=/v1/accounts/**
 
@@ -108,14 +118,14 @@ spring:
         # prefix — the saved-recipients address book (server-side, per
         # user; replaced an earlier client-side/localStorage version).
         - id: account-service-recipients
-          uri: http://localhost:8084
+          uri: ${ACCOUNT_SERVICE_URL:http://localhost:8084}
           predicates:
             - Path=/v1/recipients/**
 
         # The whole service — transaction-service has no internal-only
         # surface at all.
         - id: transaction-service
-          uri: http://localhost:8085
+          uri: ${TRANSACTION_SERVICE_URL:http://localhost:8085}
           predicates:
             - Path=/v1/transfers/**
 
