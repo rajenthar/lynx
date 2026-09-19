@@ -44,7 +44,8 @@ abstract class AbstractServiceClient {
     try {
       token = tokenProvider.currentToken();
     } catch (CallNotPermittedException | ServiceTokenException e) {
-      throw new DownstreamUnavailableException("Could not obtain a service token: " + e.getMessage(), e);
+      log.error("Could not obtain a service token", e);
+      throw new DownstreamUnavailableException("A downstream service is temporarily unavailable — please retry", e);
     }
     return callWithToken(request, token, true);
   }
@@ -54,11 +55,11 @@ abstract class AbstractServiceClient {
       return circuitBreaker.executeSupplier(() -> request.apply(token)).getBody();
     } catch (CallNotPermittedException e) {
       throw new DownstreamUnavailableException(
-          "Circuit open for this downstream service: " + e.getMessage(), e);
+          "A downstream service is temporarily unavailable — please retry", e);
     } catch (HttpClientErrorException.Unauthorized e) {
       if (!allowRetry) {
         throw new DownstreamUnavailableException(
-            "Still unauthorized after invalidating and refetching the service token", e);
+            "A downstream service is temporarily unavailable — please retry", e);
       }
       log.info("Downstream call returned 401 — invalidating cached service token and retrying once");
       tokenProvider.invalidate();
@@ -66,14 +67,16 @@ abstract class AbstractServiceClient {
       try {
         freshToken = tokenProvider.currentToken();
       } catch (CallNotPermittedException | ServiceTokenException fetchFailed) {
+        log.error("Could not refetch a service token after a 401", fetchFailed);
         throw new DownstreamUnavailableException(
-            "Could not refetch a service token after a 401: " + fetchFailed.getMessage(), fetchFailed);
+            "A downstream service is temporarily unavailable — please retry", fetchFailed);
       }
       return callWithToken(request, freshToken, false);
     } catch (HttpClientErrorException e) {
       throw new DownstreamRejectedException(e.getStatusCode().value(), extractMessage(e));
     } catch (HttpServerErrorException | ResourceAccessException e) {
-      throw new DownstreamUnavailableException("Downstream call failed: " + e.getMessage(), e);
+      log.warn("Downstream call failed", e);
+      throw new DownstreamUnavailableException("A downstream service is temporarily unavailable — please retry", e);
     }
   }
 
